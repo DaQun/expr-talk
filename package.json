@@ -1,0 +1,23 @@
+{
+  "name": "expr-talk",
+  "private": true,
+  "version": "0.1.0",
+  "description": "本地优先的表达训练系统（ExprTalk）",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @expr-talk/desktop",
+    "build": "npm run build -w @expr-talk/desktop",
+    "preview": "npm run preview -w @expr-talk/desktop",
+    "tauri": "npm run tauri -w @expr-talk/desktop",
+    "tauri:dev": "npm run tauri -w @expr-talk/desktop -- dev",
+    "tauri:build": "npm run tauri -w @expr-talk/desktop -- build",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

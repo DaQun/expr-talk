@@ -1,0 +1,200 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  ExprTalk · 方案 C 浅色主题
+  — 暖白纸感底 + 香槟金强调 + 淡紫氛围
+*/
+:root {
+  color-scheme: light;
+  --radius: 0.875rem;
+
+  /* 暖白纸感背景 */
+  --background: oklch(0.975 0.008 95);
+  --foreground: oklch(0.24 0.02 285);
+
+  /* 纯白卡片，略抬升 */
+  --card: oklch(1 0.002 95);
+  --card-foreground: oklch(0.24 0.02 285);
+  --popover: oklch(1 0.002 95);
+  --popover-foreground: oklch(0.24 0.02 285);
+
+  /* 香槟金主色（浅色上略深，保证对比） */
+  --primary: oklch(0.78 0.11 82);
+  --primary-foreground: oklch(0.22 0.04 75);
+
+  --secondary: oklch(0.95 0.01 95);
+  --secondary-foreground: oklch(0.32 0.02 285);
+
+  --muted: oklch(0.955 0.01 95);
+  --muted-foreground: oklch(0.48 0.02 280);
+
+  --accent: oklch(0.96 0.015 90);
+  --accent-foreground: oklch(0.28 0.025 285);
+
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: oklch(0.99 0.01 90);
+
+  --border: oklch(0.3 0.02 285 / 12%);
+  --input: oklch(0.3 0.02 285 / 14%);
+  --ring: oklch(0.72 0.1 82);
+
+  --success: oklch(0.55 0.12 155);
+  --success-foreground: oklch(0.99 0.01 155);
+  --warning: oklch(0.7 0.13 75);
+  --warning-foreground: oklch(0.25 0.05 75);
+
+  --chart-1: oklch(0.72 0.11 82);
+  --chart-2: oklch(0.55 0.12 155);
+  --chart-3: oklch(0.55 0.1 285);
+  --chart-4: oklch(0.55 0.2 25);
+  --chart-5: oklch(0.65 0.08 40);
+
+  /* 侧栏：略暖的浅灰白 */
+  --sidebar: oklch(0.985 0.006 95);
+  --sidebar-foreground: oklch(0.28 0.02 285);
+  --sidebar-primary: oklch(0.72 0.11 82);
+  --sidebar-primary-foreground: oklch(0.22 0.04 75);
+  --sidebar-accent: oklch(0.95 0.02 90);
+  --sidebar-accent-foreground: oklch(0.26 0.025 285);
+  --sidebar-border: oklch(0.3 0.02 285 / 10%);
+  --sidebar-ring: oklch(0.72 0.1 82);
+
+  --glow-gold: oklch(0.85 0.1 85 / 28%);
+  --glow-violet: oklch(0.7 0.08 290 / 12%);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-sans:
+    "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue",
+    system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/40;
+  }
+
+  html,
+  body,
+  #root {
+    @apply m-0 min-h-full;
+  }
+
+  body {
+    @apply text-foreground font-sans antialiased min-w-80;
+    background-color: var(--background);
+    background-image:
+      radial-gradient(ellipse 70% 45% at 0% -5%, var(--glow-violet), transparent 55%),
+      radial-gradient(ellipse 55% 40% at 100% 0%, var(--glow-gold), transparent 50%),
+      radial-gradient(ellipse 45% 30% at 60% 100%, oklch(0.85 0.04 290 / 15%), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: oklch(0.82 0.1 85 / 35%);
+    color: var(--foreground);
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+}
+
+@layer utilities {
+  .surface-elevated {
+    background:
+      linear-gradient(
+        165deg,
+        oklch(1 0 0 / 90%) 0%,
+        transparent 50%
+      ),
+      var(--card);
+    box-shadow:
+      inset 0 1px 0 oklch(1 0 0 / 90%),
+      0 1px 2px oklch(0.3 0.02 285 / 4%),
+      0 8px 24px oklch(0.3 0.02 285 / 6%);
+  }
+
+  .surface-hero {
+    background:
+      radial-gradient(
+        ellipse 90% 80% at 100% 0%,
+        oklch(0.88 0.1 85 / 22%),
+        transparent 55%
+      ),
+      linear-gradient(
+        145deg,
+        oklch(0.85 0.06 290 / 18%) 0%,
+        transparent 48%
+      ),
+      linear-gradient(
+        165deg,
+        oklch(1 0 0 / 80%) 0%,
+        transparent 45%
+      ),
+      var(--card);
+    box-shadow:
+      inset 0 1px 0 oklch(1 0 0 / 95%),
+      0 12px 36px oklch(0.35 0.03 285 / 8%);
+  }
+
+  /* 浅色上用更深的金色渐变，保证可读 */
+  .text-gradient-gold {
+    background: linear-gradient(
+      120deg,
+      oklch(0.42 0.08 75) 0%,
+      oklch(0.55 0.12 82) 40%,
+      oklch(0.48 0.09 70) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}

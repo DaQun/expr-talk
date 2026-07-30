@@ -1,0 +1,42 @@
+# Dependencies
+node_modules
+
+# Build
+dist
+dist-ssr
+*.local
+target
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# App data (local training artifacts)
+data/
+*.wav
+*.sqlite
+*.db
+
+# Large ASR model downloads
+models/**
+!models/README.md
