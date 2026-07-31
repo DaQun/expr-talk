@@ -56,6 +56,37 @@ export type AttemptComparison = {
 
 export type DebateTurnRole = "user" | "opponent";
 
+export type FeynmanLearnerRole =
+  | "child"
+  | "student"
+  | "outsider"
+  | "challenger";
+
+export type FeynmanDifficulty = "gentle" | "standard" | "challenge";
+
+export type FeynmanCheckpointId =
+  | "definition"
+  | "mechanism"
+  | "example"
+  | "boundary";
+
+export type FeynmanCheckpointStatus =
+  | "not_started"
+  | "in_progress"
+  | "understood";
+
+export type FeynmanCheckpoint = {
+  id: FeynmanCheckpointId;
+  status: FeynmanCheckpointStatus;
+  evidence?: string;
+};
+
+export type FeynmanState = {
+  learnerRole: FeynmanLearnerRole;
+  difficulty: FeynmanDifficulty;
+  checkpoints: FeynmanCheckpoint[];
+};
+
 export type DebateTurn = {
   id: string;
   role: DebateTurnRole;
@@ -77,6 +108,8 @@ export type DebateState = {
   currentRound: number;
   turns: DebateTurn[];
   pendingQuestion?: string;
+  /** 费曼模式的学习者设定与基于对话内容的掌握检查点。 */
+  feynman?: FeynmanState;
 };
 
 export type TrainingSession = {

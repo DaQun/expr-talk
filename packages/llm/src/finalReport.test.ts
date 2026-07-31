@@ -101,12 +101,18 @@ test("rejects an empty debate question", () => {
 test("accepts a Feynman learner question or understanding result", () => {
   assert.deepEqual(
     parseFeynmanTurnResult(
-      '{"understood":false,"question":"为什么这里会产生累积效果？","focus":"因果机制"}',
+      '{"understood":false,"question":"为什么这里会产生累积效果？","focus":"因果机制","checkpoints":[{"id":"definition","status":"understood","evidence":"说明了本金和利息。"},{"id":"mechanism","status":"in_progress","evidence":"还需要解释累积原因。"},{"id":"example","status":"not_started"},{"id":"boundary","status":"not_started"}]}',
     ),
     {
       understood: false,
       question: "为什么这里会产生累积效果？",
       focus: "因果机制",
+      checkpoints: [
+        { id: "definition", status: "understood", evidence: "说明了本金和利息。" },
+        { id: "mechanism", status: "in_progress", evidence: "还需要解释累积原因。" },
+        { id: "example", status: "not_started", evidence: undefined },
+        { id: "boundary", status: "not_started", evidence: undefined },
+      ],
     },
   );
   assert.deepEqual(
@@ -117,8 +123,27 @@ test("accepts a Feynman learner question or understanding result", () => {
       understood: true,
       question: "",
       focus: "已理解定义和例子",
+      checkpoints: [
+        { id: "definition", status: "not_started" },
+        { id: "mechanism", status: "not_started" },
+        { id: "example", status: "not_started" },
+        { id: "boundary", status: "not_started" },
+      ],
     },
   );
+});
+
+test("normalizes incomplete and invalid Feynman checkpoints", () => {
+  const result = parseFeynmanTurnResult(
+    '{"understood":false,"question":"能举个例子吗？","checkpoints":[{"id":"example","status":"understood","evidence":"购物时比较两件商品。"},{"id":"unknown","status":"understood"},{"id":"boundary","status":"invalid"}]}',
+  );
+
+  assert.deepEqual(result.checkpoints, [
+    { id: "definition", status: "not_started" },
+    { id: "mechanism", status: "not_started" },
+    { id: "example", status: "understood", evidence: "购物时比较两件商品。" },
+    { id: "boundary", status: "not_started" },
+  ]);
 });
 
 test("rejects a Feynman continuation without a learner question", () => {

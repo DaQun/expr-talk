@@ -43,6 +43,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useElapsedSeconds } from "@/hooks/useElapsedSeconds";
+import { FeynmanWorkbench } from "@/components/FeynmanWorkbench";
 
 export function PracticePage() {
   const navigate = useNavigate();
@@ -63,6 +64,10 @@ export function PracticePage() {
     setDraftMode,
     setDraftTopic,
     setPasteText,
+    feynmanLearnerRole,
+    feynmanDifficulty,
+    setFeynmanLearnerRole,
+    setFeynmanDifficulty,
     createAndStart,
     rerecord,
     discardRecording,
@@ -97,9 +102,6 @@ export function PracticePage() {
 
   const [seconds, setSeconds] = useState(0);
   const [pasteOpen, setPasteOpen] = useState(false);
-  const [feynmanInputMode, setFeynmanInputMode] = useState<"text" | "voice">(
-    "text",
-  );
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [topicCategory, setTopicCategory] = useState("全部");
   const [topicId, setTopicId] = useState<string | null>(null);
@@ -110,12 +112,6 @@ export function PracticePage() {
   const feynmanMode = draftMode === "feynman";
   const interactiveMode = debateMode || feynmanMode;
   const debateWaiting = interactiveMode && current?.status === "debating";
-  const feynmanResponseActive =
-    feynmanMode &&
-    Boolean(current?.debate?.pendingQuestion) &&
-    (debateWaiting || recording);
-  const showInlineFeynmanRecorder =
-    feynmanResponseActive && feynmanInputMode === "voice";
   const sessionActive = recording || debateWaiting;
   const tauri = audioApi.isTauri();
   const levelPct = Math.min(100, Math.round(level * 400));
@@ -410,6 +406,114 @@ export function PracticePage() {
     </div>
   );
 
+  const discardDialog = confirmDiscard
+    ? createPortal(
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4 backdrop-blur-[2px]"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !analyzing) {
+              setConfirmDiscard(false);
+            }
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="discard-title"
+            aria-describedby="discard-description"
+            className="bg-card w-full max-w-sm rounded-xl border border-border p-5 shadow-2xl"
+          >
+            <h2 id="discard-title" className="m-0 text-lg font-semibold">
+              放弃本轮录音？
+            </h2>
+            <p
+              id="discard-description"
+              className="text-muted-foreground mt-2 mb-0 text-sm leading-relaxed"
+            >
+              当前录音和字幕会被丢弃，不会生成复盘报告。题目仍会保留。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                disabled={analyzing}
+                autoFocus
+                onClick={() => setConfirmDiscard(false)}
+              >
+                继续录音
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={analyzing}
+                onClick={() => {
+                  void (async () => {
+                    await discardRecording();
+                    setConfirmDiscard(false);
+                  })();
+                }}
+              >
+                确认放弃
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  if (feynmanMode) {
+    return (
+      <FeynmanWorkbench
+        draftTopic={draftTopic}
+        draftMode={draftMode}
+        topicCategory={topicCategory}
+        topicCategories={topicCategories}
+        topicId={topicId}
+        topics={modeTopics}
+        current={current}
+        recording={recording}
+        waiting={debateWaiting}
+        analyzing={analyzing}
+        pasteText={pasteText}
+        learnerRole={feynmanLearnerRole}
+        difficulty={feynmanDifficulty}
+        modelReady={modelStatus?.ready ?? null}
+        recorderPanel={recorderPanel}
+        discardDialog={discardDialog}
+        guidance={
+          <GuidancePanel
+            title={recording ? "录音中提示" : "开始前检查"}
+            items={guidance.filter((item) => item.id !== "ready")}
+          />
+        }
+        analyzeNote={
+          analyzeNote
+            ? `${analyzeNote}${analyzing ? ` · 已等待 ${analyzeElapsed} 秒` : ""}`
+            : null
+        }
+        error={error}
+        onModeChange={setDraftMode}
+        onTopicCategoryChange={setTopicCategory}
+        onTopicSelect={selectTopic}
+        onTopicChange={(topic) => {
+          setDraftTopic(topic);
+          setTopicId(null);
+        }}
+        onPasteTextChange={setPasteText}
+        onLearnerRoleChange={setFeynmanLearnerRole}
+        onDifficultyChange={setFeynmanDifficulty}
+        onStartVoice={() => void createAndStart()}
+        onStartResponse={() => void startDebateResponse()}
+        onSubmitText={() => void handlePasteSubmit()}
+        onRetryQuestion={() => void requestDebateQuestion()}
+        onOpenReview={() => {
+          const id = useSessionStore.getState().current?.id;
+          if (id) navigate(`/review/${id}`);
+        }}
+      />
+    );
+  }
+
   return (
     <div>
       <PageHeader
@@ -466,10 +570,10 @@ export function PracticePage() {
               </p>
             </div>
 
-            {interactiveMode && current?.debate && current.debate.turns.length > 0 && (
+            {debateMode && current?.debate && current.debate.turns.length > 0 && (
               <div className="bg-background max-h-64 overflow-y-auto rounded-lg border border-border p-3.5">
                 <div className="text-muted-foreground mb-2 text-[0.72rem] font-medium tracking-wide uppercase">
-                  {feynmanMode ? "费曼讲解" : "辩论记录"} · 第 {current.debate.currentRound} 轮
+                  辩论记录 · 第 {current.debate.currentRound} 轮
                 </div>
                 <div className="flex flex-col gap-2 text-sm leading-relaxed">
                   {current.debate.turns
@@ -492,13 +596,7 @@ export function PracticePage() {
                         )}
                       >
                         <div className="text-muted-foreground mb-0.5 text-xs">
-                          {turn.role === "opponent"
-                            ? feynmanMode
-                              ? "小白提问"
-                              : "反方质询"
-                            : feynmanMode
-                              ? "我的讲解"
-                              : "我的发言"} · 第 {turn.round} 轮
+                          {turn.role === "opponent" ? "反方质询" : "我的发言"} · 第 {turn.round} 轮
                         </div>
                         {turn.text}
                       </div>
@@ -507,71 +605,12 @@ export function PracticePage() {
               </div>
             )}
 
-            {(debateWaiting || feynmanResponseActive) && current?.debate?.pendingQuestion && (
+            {debateWaiting && current?.debate?.pendingQuestion && (
               <div className="border-warning/50 bg-warning/10 rounded-lg border px-3.5 py-3">
                 <div className="text-warning-foreground mb-1 text-xs font-medium">
-                  {feynmanMode ? "小白提问" : "反方质询"}
+                  反方质询
                 </div>
                 <p className="m-0 text-sm leading-relaxed">{current.debate.pendingQuestion}</p>
-              </div>
-            )}
-
-            {feynmanResponseActive && current?.debate?.pendingQuestion && (
-              <div className="border-warning/30 bg-muted/30 flex flex-col gap-2.5 rounded-lg border p-3.5">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium">
-                    {feynmanInputMode === "text" ? "我的讲解" : "录音讲解"}
-                  </span>
-                  <span className="text-muted-foreground text-xs">
-                    第 {(current.debate.currentRound ?? 1) + (recording ? 0 : 1)} 轮
-                  </span>
-                </div>
-                <div
-                  className="bg-background flex w-fit items-center gap-1 rounded-lg border border-border p-1"
-                  role="group"
-                  aria-label="讲解输入方式"
-                >
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={feynmanInputMode === "text" ? "default" : "ghost"}
-                    disabled={recording}
-                    onClick={() => setFeynmanInputMode("text")}
-                  >
-                    文字讲解
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={feynmanInputMode === "voice" ? "default" : "ghost"}
-                    disabled={recording}
-                    onClick={() => setFeynmanInputMode("voice")}
-                  >
-                    录音讲解
-                  </Button>
-                </div>
-                {showInlineFeynmanRecorder ? (
-                  recorderPanel
-                ) : (
-                  <>
-                    <Textarea
-                      id="feynman-paste"
-                      value={pasteText}
-                      onChange={(e) => setPasteText(e.target.value)}
-                      placeholder="直接解释给小白听…"
-                      disabled={analyzing}
-                      rows={5}
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        disabled={analyzing || !pasteText.trim()}
-                        onClick={() => void handlePasteSubmit()}
-                      >
-                        提交本轮讲解
-                      </Button>
-                    </div>
-                  </>
-                )}
               </div>
             )}
 
@@ -581,7 +620,7 @@ export function PracticePage() {
                 disabled={analyzing}
                 onClick={() => void requestDebateQuestion()}
               >
-                重试生成{feynmanMode ? "小白提问" : "反方质询"}
+                重试生成反方质询
               </Button>
             )}
 
@@ -606,11 +645,7 @@ export function PracticePage() {
                 </Select>
               </div>
 
-              {(draftMode === "short_video" ||
-                draftMode === "debate" ||
-                draftMode === "feynman" ||
-                draftMode === "free") && (
-                <div className="space-y-1.5">
+              <div className="space-y-1.5">
                   <div className="flex flex-wrap items-end gap-2">
                     <div className="min-w-[8rem] flex-1 space-y-2">
                       <Label htmlFor="topic-cat">
@@ -692,8 +727,7 @@ export function PracticePage() {
                       换一题
                     </Button>
                   </div>
-                </div>
-              )}
+              </div>
 
               <div className="space-y-1.5 lg:col-span-2">
                 <Label htmlFor="topic">题目（可改）</Label>
@@ -711,33 +745,25 @@ export function PracticePage() {
               </div>
             </div>
 
-            {!feynmanResponseActive && recorderPanel}
+            {recorderPanel}
 
-            {!feynmanResponseActive && (
-              <div className="flex flex-wrap gap-2.5">
-                <Button variant="ghost" onClick={() => setPasteOpen((v) => !v)}>
-                  {pasteOpen ? "收起粘贴稿" : "没有字幕？粘贴文本"}
-                </Button>
-              </div>
-            )}
+            <div className="flex flex-wrap gap-2.5">
+              <Button variant="ghost" onClick={() => setPasteOpen((v) => !v)}>
+                {pasteOpen ? "收起粘贴稿" : "没有字幕？粘贴文本"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
-        {pasteOpen && !feynmanResponseActive && (
+        {pasteOpen && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
-                {debateWaiting
-                  ? feynmanMode
-                    ? "粘贴本轮讲解"
-                    : "粘贴本轮回应"
-                  : "粘贴逐字稿"}
+                {debateWaiting ? "粘贴本轮回应" : "粘贴逐字稿"}
               </CardTitle>
               <CardDescription>
                 {debateWaiting
-                  ? feynmanMode
-                    ? `将作为第 ${(current?.debate?.currentRound ?? 1) + 1} 轮讲解，提交后由小白判断是否已经理解。`
-                    : `将作为第 ${(current?.debate?.currentRound ?? 1) + 1} 轮我方回应，提交后继续生成反方质询。`
+                  ? `将作为第 ${(current?.debate?.currentRound ?? 1) + 1} 轮我方回应，提交后继续生成反方质询。`
                   : "优先于 ASR 结果。适合模型未就绪、浏览器预览，或识别不准时补救。"}
               </CardDescription>
             </CardHeader>
@@ -759,19 +785,13 @@ export function PracticePage() {
                   onClick={() => void handlePasteSubmit()}
                 >
                   {recording && interactiveMode
-                    ? feynmanMode
-                      ? "用粘贴稿结束本轮讲解"
-                      : "用粘贴稿结束本轮"
+                    ? "用粘贴稿结束本轮"
                     : recording
                       ? "用粘贴稿停止并分析"
                       : debateWaiting
-                        ? feynmanMode
-                          ? `提交第 ${(current?.debate?.currentRound ?? 1) + 1} 轮讲解`
-                          : `提交第 ${(current?.debate?.currentRound ?? 1) + 1} 轮文字回应`
+                        ? `提交第 ${(current?.debate?.currentRound ?? 1) + 1} 轮文字回应`
                         : debateMode
                           ? "提交首轮文字立论"
-                          : feynmanMode
-                            ? "提交首轮讲解"
                           : "仅分析粘贴文本"}
                 </Button>
                 {debateWaiting && debateMode && (
@@ -808,59 +828,7 @@ export function PracticePage() {
         )}
       </div>
 
-      {confirmDiscard &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4 backdrop-blur-[2px]"
-            role="presentation"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget && !analyzing) {
-                setConfirmDiscard(false);
-              }
-            }}
-          >
-            <div
-              role="alertdialog"
-              aria-modal="true"
-              aria-labelledby="discard-title"
-              aria-describedby="discard-description"
-              className="bg-card w-full max-w-sm rounded-xl border border-border p-5 shadow-2xl"
-            >
-              <h2 id="discard-title" className="m-0 text-lg font-semibold">
-                放弃本轮录音？
-              </h2>
-              <p
-                id="discard-description"
-                className="text-muted-foreground mt-2 mb-0 text-sm leading-relaxed"
-              >
-                当前录音和字幕会被丢弃，不会生成复盘报告。题目仍会保留。
-              </p>
-              <div className="mt-5 flex justify-end gap-2">
-                <Button
-                  variant="secondary"
-                  disabled={analyzing}
-                  autoFocus
-                  onClick={() => setConfirmDiscard(false)}
-                >
-                  继续录音
-                </Button>
-                <Button
-                  variant="destructive"
-                  disabled={analyzing}
-                  onClick={() => {
-                    void (async () => {
-                      await discardRecording();
-                      setConfirmDiscard(false);
-                    })();
-                  }}
-                >
-                  确认放弃
-                </Button>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
+      {discardDialog}
     </div>
   );
 }

@@ -3,6 +3,9 @@ import type {
   AttemptComparison,
   CreateSessionInput,
   DebateState,
+  FeynmanCheckpoint,
+  FeynmanDifficulty,
+  FeynmanLearnerRole,
   PracticeMode,
   StructuredReport,
   TrainingGoal,
@@ -65,10 +68,14 @@ type SessionState = {
   modelStatus: AsrModelStatus | null;
   /** 即将开始的复练上下文 */
   retryParentId: string | null;
+  feynmanLearnerRole: FeynmanLearnerRole;
+  feynmanDifficulty: FeynmanDifficulty;
   setDraftMode: (mode: PracticeMode) => void;
   setDraftTopic: (topic: string) => void;
   setDraftGoal: (goal: TrainingGoal | string) => void;
   setPasteText: (text: string) => void;
+  setFeynmanLearnerRole: (role: FeynmanLearnerRole) => void;
+  setFeynmanDifficulty: (difficulty: FeynmanDifficulty) => void;
   refreshModelStatus: () => Promise<void>;
   createAndStart: () => Promise<void>;
   /** 从父 session 发起复练并开始录音 */
@@ -185,12 +192,42 @@ function interactiveQuestionLabel(mode: PracticeMode): string {
   return isFeynmanMode(mode) ? "小白提问" : "反方质询";
 }
 
-function initialDebateState(kind: "debate" | "feynman" = "debate"): DebateState {
+const FEYNMAN_CHECKPOINTS: FeynmanCheckpoint[] = [
+  { id: "definition", status: "not_started" },
+  { id: "mechanism", status: "not_started" },
+  { id: "example", status: "not_started" },
+  { id: "boundary", status: "not_started" },
+];
+
+function initialDebateState(
+  kind: "debate" | "feynman" = "debate",
+  feynman?: { learnerRole: FeynmanLearnerRole; difficulty: FeynmanDifficulty },
+): DebateState {
   return {
     kind,
     phase: "opening",
     currentRound: 1,
     turns: [],
+    ...(kind === "feynman"
+      ? {
+          feynman: {
+            learnerRole: feynman?.learnerRole ?? "outsider",
+            difficulty: feynman?.difficulty ?? "standard",
+            checkpoints: FEYNMAN_CHECKPOINTS.map((checkpoint) => ({ ...checkpoint })),
+          },
+        }
+      : {}),
+  };
+}
+
+function withFeynmanCheckpoints(
+  state: DebateState,
+  checkpoints: FeynmanCheckpoint[] | undefined,
+): DebateState {
+  if (!state.feynman || !checkpoints?.length) return state;
+  return {
+    ...state,
+    feynman: { ...state.feynman, checkpoints },
   };
 }
 
@@ -214,7 +251,12 @@ function formatDebateTranscript(debate: DebateState): string {
 async function generateInteractiveQuestion(
   session: TrainingSession,
   onProgress: (progress: LLMStreamProgress) => void,
-): Promise<{ question: string; understood: boolean; focus?: string }> {
+): Promise<{
+  question: string;
+  understood: boolean;
+  focus?: string;
+  checkpoints?: FeynmanCheckpoint[];
+}> {
   if (session.mode === "feynman") {
     return api.generateFeynmanQuestion(session, onProgress);
   }
@@ -262,9 +304,10 @@ async function completeInteractiveSession(
 function completeFeynmanState(
   state: DebateState,
   focus: string,
+  checkpoints?: FeynmanCheckpoint[],
 ): DebateState {
   return {
-    ...state,
+    ...withFeynmanCheckpoints(state, checkpoints),
     phase: "completed",
     pendingQuestion: undefined,
     turns: [
@@ -376,6 +419,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   asrStatus: null,
   modelStatus: null,
   retryParentId: null,
+  feynmanLearnerRole: "outsider",
+  feynmanDifficulty: "standard",
 
   setDraftMode: (mode) => {
     const m = normalizePracticeMode(mode);
@@ -389,6 +434,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setDraftTopic: (topic) => set({ draftTopic: topic }),
   setDraftGoal: (goal) => set({ draftGoal: goal }),
   setPasteText: (text) => set({ pasteText: text }),
+  setFeynmanLearnerRole: (role) => set({ feynmanLearnerRole: role }),
+  setFeynmanDifficulty: (difficulty) => set({ feynmanDifficulty: difficulty }),
   clearError: () => set({ error: null }),
 
   refreshModelStatus: async () => {
@@ -419,7 +466,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       liveTranscript: [],
       round: 1,
       ...(isInteractiveMode(draftMode)
-        ? { debate: initialDebateState(draftMode) }
+        ? {
+            debate: initialDebateState(
+              draftMode,
+              draftMode === "feynman"
+                ? {
+                    learnerRole: get().feynmanLearnerRole,
+                    difficulty: get().feynmanDifficulty,
+                  }
+                : undefined,
+            ),
+          }
         : {}),
     };
 
@@ -573,6 +630,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         parent.report?.nextPractice.targetIssue ?? parent.targetIssue;
       const round = (parent.round ?? 1) + 1;
       const mode = normalizePracticeMode(parent.mode);
+      const parentFeynman = parent.debate?.feynman;
 
       const provisional: TrainingSession = {
         id: localId(),
@@ -586,7 +644,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         round,
         targetIssue,
         ...(isInteractiveMode(mode)
-          ? { debate: initialDebateState(mode) }
+          ? {
+              debate: initialDebateState(
+                mode,
+                mode === "feynman"
+                  ? {
+                      learnerRole:
+                        parentFeynman?.learnerRole ?? get().feynmanLearnerRole,
+                      difficulty:
+                        parentFeynman?.difficulty ?? get().feynmanDifficulty,
+                    }
+                  : undefined,
+              ),
+            }
           : {}),
       };
 
@@ -1046,7 +1116,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           if (result.understood) {
             sessionForAnalyze = {
               ...sessionForAnalyze,
-              debate: completeFeynmanState(debateWithUser, result.focus ?? ""),
+              debate: completeFeynmanState(
+                debateWithUser,
+                result.focus ?? "",
+                result.checkpoints,
+              ),
             };
             await api.updateSession(sessionForAnalyze);
             set({
@@ -1062,7 +1136,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
               createdAt: new Date().toISOString(),
             };
             const nextDebate: DebateState = {
-              ...debateWithUser,
+              ...withFeynmanCheckpoints(debateWithUser, result.checkpoints),
               phase: "cross_examination",
               pendingQuestion: result.question,
               turns: [...debateWithUser.turns, opponentTurn],
@@ -1225,7 +1299,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         set({ analyzeNote: "小白已经听懂，正在生成整场复盘…" });
         const understood = {
           ...current,
-          debate: completeFeynmanState(current.debate, result.focus ?? ""),
+          debate: completeFeynmanState(
+            current.debate,
+            result.focus ?? "",
+            result.checkpoints,
+          ),
         };
         const completed = await completeInteractiveSession(understood, set);
         set({
@@ -1246,7 +1324,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         createdAt: new Date().toISOString(),
       };
       const debate: DebateState = {
-        ...current.debate,
+        ...withFeynmanCheckpoints(current.debate, result.checkpoints),
         phase: "cross_examination",
         pendingQuestion: result.question,
         turns: [...current.debate.turns, turn],
@@ -1342,7 +1420,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         set({ analyzeNote: "小白已经听懂，正在生成整场复盘…" });
         const understood = {
           ...updated,
-          debate: completeFeynmanState(debateWithUser, result.focus ?? ""),
+          debate: completeFeynmanState(
+            debateWithUser,
+            result.focus ?? "",
+            result.checkpoints,
+          ),
         };
         const completed = await completeInteractiveSession(understood, set);
         set({
@@ -1357,7 +1439,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         return true;
       }
       const nextDebate: DebateState = {
-        ...debateWithUser,
+        ...withFeynmanCheckpoints(debateWithUser, result.checkpoints),
         pendingQuestion: result.question,
         turns: [
           ...debateWithUser.turns,
@@ -1455,7 +1537,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       if (isInteractiveMode(input.mode)) {
         const questionLabel = interactiveQuestionLabel(input.mode);
         const debate: DebateState = {
-          ...initialDebateState(input.mode),
+          ...initialDebateState(
+            input.mode,
+            input.mode === "feynman"
+              ? {
+                  learnerRole: get().feynmanLearnerRole,
+                  difficulty: get().feynmanDifficulty,
+                }
+              : undefined,
+          ),
           phase: "cross_examination",
           turns: [
             {
@@ -1485,7 +1575,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           set({ analyzeNote: "小白已经听懂，正在生成整场复盘…" });
           const understood = {
             ...stopped,
-            debate: completeFeynmanState(debate, result.focus ?? ""),
+            debate: completeFeynmanState(
+              debate,
+              result.focus ?? "",
+              result.checkpoints,
+            ),
           };
           const completed = await completeInteractiveSession(understood, set);
           set({
@@ -1500,7 +1594,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           return;
         }
         const nextDebate: DebateState = {
-          ...debate,
+          ...withFeynmanCheckpoints(debate, result.checkpoints),
           pendingQuestion: result.question,
           turns: [
             ...debate.turns,
