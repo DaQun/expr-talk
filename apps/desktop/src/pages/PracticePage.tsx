@@ -76,7 +76,7 @@ export function PracticePage() {
     startDebateResponse,
     requestDebateQuestion,
     submitDebateText,
-    finishDebate,
+    finishInteractiveSession,
     analyzePaste,
     refreshModelStatus,
     loadSession,
@@ -127,7 +127,7 @@ export function PracticePage() {
   const analyzeElapsed = useElapsedSeconds(analyzing);
 
   async function finishDebateAndReview() {
-    await finishDebate();
+    await finishInteractiveSession();
     const state = useSessionStore.getState();
     if (state.current?.id && state.report) {
       navigate(`/review/${state.current.id}`);
@@ -508,6 +508,7 @@ export function PracticePage() {
         onStartResponse={() => void startDebateResponse()}
         onSubmitText={() => void handlePasteSubmit()}
         onRetryQuestion={() => void requestDebateQuestion()}
+        onFinish={() => void finishDebateAndReview()}
         onAbandon={() => setConfirmDiscard(true)}
         onOpenReview={() => {
           const id = useSessionStore.getState().current?.id;

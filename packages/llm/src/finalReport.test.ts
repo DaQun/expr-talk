@@ -7,7 +7,12 @@ import {
   setOpenAICompatibleStreamTransport,
 } from "./openai_compatible";
 import { parseDebateTurnResult } from "./debate";
-import { generateFeynmanTurn, parseFeynmanTurnResult } from "./feynman";
+import {
+  generateFeynmanTurn,
+  mergeFeynmanCheckpoints,
+  parseFeynmanTurnResult,
+  shouldCompleteFeynmanTurn,
+} from "./feynman";
 
 const baseReport = {
   schemaVersion: 4,
@@ -145,6 +150,35 @@ test("normalizes incomplete and invalid Feynman checkpoints", () => {
     { id: "example", status: "understood", evidence: "购物时比较两件商品。" },
     { id: "boundary", status: "not_started" },
   ]);
+});
+
+test("keeps Feynman checkpoints monotonic across rounds", () => {
+  assert.deepEqual(
+    mergeFeynmanCheckpoints(
+      [
+        { id: "definition", status: "understood", evidence: "用户已给出定义。" },
+        { id: "mechanism", status: "in_progress", evidence: "机制尚待说明。" },
+      ],
+      [
+        { id: "definition", status: "not_started" },
+        { id: "mechanism", status: "understood", evidence: "用户解释了因果链。" },
+        { id: "example", status: "in_progress" },
+        { id: "boundary", status: "not_started" },
+      ],
+    ),
+    [
+      { id: "definition", status: "understood", evidence: "用户已给出定义。" },
+      { id: "mechanism", status: "understood", evidence: "用户解释了因果链。" },
+      { id: "example", status: "in_progress" },
+      { id: "boundary", status: "not_started" },
+    ],
+  );
+});
+
+test("ends Feynman questioning after six rounds", () => {
+  assert.equal(shouldCompleteFeynmanTurn(5, false), false);
+  assert.equal(shouldCompleteFeynmanTurn(6, false), true);
+  assert.equal(shouldCompleteFeynmanTurn(2, true), true);
 });
 
 test("rejects a Feynman continuation without a learner question", () => {

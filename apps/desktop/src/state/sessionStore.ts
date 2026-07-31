@@ -19,7 +19,11 @@ import {
   normalizePracticeMode,
 } from "@expr-talk/shared";
 import { compareAttempts, formatFinalAsrSegment, joinFinalSegments } from "@expr-talk/core";
-import type { LLMStreamProgress } from "@expr-talk/llm";
+import {
+  mergeFeynmanCheckpoints,
+  shouldCompleteFeynmanTurn,
+  type LLMStreamProgress,
+} from "@expr-talk/llm";
 import { api } from "../ipc/client";
 import { MicRecorder } from "../audio/recorder";
 import type { AsrEventPayload, AsrModelStatus } from "../ipc/audio";
@@ -92,7 +96,7 @@ type SessionState = {
   requestDebateQuestion: () => Promise<void>;
   /** 提交粘贴文字作为当前反方质询的回应；返回 true 时进入复盘。 */
   submitDebateText: () => Promise<boolean>;
-  finishDebate: () => Promise<void>;
+  finishInteractiveSession: () => Promise<void>;
   analyzePaste: () => Promise<void>;
   /**
    * 复盘页：对已有素材重新评审。
@@ -259,7 +263,13 @@ function withFeynmanCheckpoints(
   if (!state.feynman || !checkpoints?.length) return state;
   return {
     ...state,
-    feynman: { ...state.feynman, checkpoints },
+    feynman: {
+      ...state.feynman,
+      checkpoints: mergeFeynmanCheckpoints(
+        state.feynman.checkpoints,
+        checkpoints,
+      ),
+    },
   };
 }
 
@@ -351,6 +361,51 @@ function completeFeynmanState(
         text: focus
           ? `我已经理解：${focus}`
           : "我已经理解这个概念了。",
+        createdAt: new Date().toISOString(),
+      },
+    ],
+  };
+}
+
+function shouldFinishFeynmanRound(
+  session: TrainingSession,
+  result: { understood: boolean },
+): boolean {
+  return (
+    session.mode === "feynman" &&
+    shouldCompleteFeynmanTurn(
+      session.debate?.currentRound ?? 0,
+      result.understood,
+    )
+  );
+}
+
+function finishFeynmanEvaluation(
+  state: DebateState,
+  result: {
+    understood: boolean;
+    focus?: string;
+    checkpoints?: FeynmanCheckpoint[];
+  },
+): DebateState {
+  if (result.understood) {
+    return completeFeynmanState(
+      state,
+      result.focus ?? "",
+      result.checkpoints,
+    );
+  }
+  return {
+    ...withFeynmanCheckpoints(state, result.checkpoints),
+    phase: "completed",
+    pendingQuestion: undefined,
+    turns: [
+      ...state.turns,
+      {
+        id: `feynman_round_limit_${Date.now()}`,
+        role: "opponent",
+        round: state.currentRound,
+        text: "本次讲解已达到 6 轮，先结束追问并进入复盘。",
         createdAt: new Date().toISOString(),
       },
     ],
@@ -1114,19 +1169,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             sessionForAnalyze,
             createInteractiveProgressReporter(set),
           );
-          if (result.understood) {
+          if (shouldFinishFeynmanRound(sessionForAnalyze, result)) {
             sessionForAnalyze = {
               ...sessionForAnalyze,
-              debate: completeFeynmanState(
-                debateWithUser,
-                result.focus ?? "",
-                result.checkpoints,
-              ),
+              debate: finishFeynmanEvaluation(debateWithUser, result),
             };
             await api.updateSession(sessionForAnalyze);
             set({
               current: sessionForAnalyze,
-              analyzeNote: "小白已经听懂，正在生成整场复盘…",
+              analyzeNote: result.understood
+                ? "小白已经听懂，正在生成整场复盘…"
+                : "已达到 6 轮，正在生成整场复盘…",
             });
           } else {
             const opponentTurn = {
@@ -1303,15 +1356,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         current,
         createInteractiveProgressReporter(set),
       );
-      if (result.understood) {
-        set({ analyzeNote: "小白已经听懂，正在生成整场复盘…" });
+      if (shouldFinishFeynmanRound(current, result)) {
+        set({
+          analyzeNote: result.understood
+            ? "小白已经听懂，正在生成整场复盘…"
+            : "已达到 6 轮，正在生成整场复盘…",
+        });
         const understood = {
           ...current,
-          debate: completeFeynmanState(
-            current.debate,
-            result.focus ?? "",
-            result.checkpoints,
-          ),
+          debate: finishFeynmanEvaluation(current.debate, result),
         };
         const completed = await completeInteractiveSession(understood, set);
         set({
@@ -1436,15 +1489,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         updated,
         createInteractiveProgressReporter(set),
       );
-      if (result.understood) {
-        set({ analyzeNote: "小白已经听懂，正在生成整场复盘…" });
+      if (shouldFinishFeynmanRound(updated, result)) {
+        set({
+          analyzeNote: result.understood
+            ? "小白已经听懂，正在生成整场复盘…"
+            : "已达到 6 轮，正在生成整场复盘…",
+        });
         const understood = {
           ...updated,
-          debate: completeFeynmanState(
-            debateWithUser,
-            result.focus ?? "",
-            result.checkpoints,
-          ),
+          debate: finishFeynmanEvaluation(debateWithUser, result),
         };
         const completed = await completeInteractiveSession(understood, set);
         set({
@@ -1509,11 +1562,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  finishDebate: async () => {
+  finishInteractiveSession: async () => {
     if (get().analyzing) return;
     const current = get().current;
-    if (!current?.debate || current.mode !== "debate") return;
-    set({ analyzing: true, error: null, analyzeNote: "辩论结束，正在生成总复盘…" });
+    if (!current?.debate || !isInteractiveMode(current.mode)) return;
+    const feynmanMode = current.mode === "feynman";
+    set({
+      analyzing: true,
+      error: null,
+      analyzeNote: feynmanMode
+        ? "讲解结束，正在生成复盘…"
+        : "辩论结束，正在生成总复盘…",
+    });
     try {
       const completed = await completeInteractiveSession(current, set);
       set({
@@ -1521,14 +1581,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         report: completed.report,
         comparison: null,
         analyzing: false,
-        analyzeNote: "完成：辩论总复盘",
+        analyzeNote: feynmanMode ? "完成：费曼学习复盘" : "完成：辩论总复盘",
         error: null,
       });
     } catch (e) {
       set({
         analyzing: false,
         error: e instanceof Error ? e.message : String(e),
-        analyzeNote: "总复盘生成失败",
+        analyzeNote: feynmanMode ? "费曼学习复盘生成失败" : "总复盘生成失败",
       });
     }
   },
@@ -1605,15 +1665,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           stopped,
           createInteractiveProgressReporter(set),
         );
-        if (result.understood) {
-          set({ analyzeNote: "小白已经听懂，正在生成整场复盘…" });
+        if (shouldFinishFeynmanRound(stopped, result)) {
+          set({
+            analyzeNote: result.understood
+              ? "小白已经听懂，正在生成整场复盘…"
+              : "已达到 6 轮，正在生成整场复盘…",
+          });
           const understood = {
             ...stopped,
-            debate: completeFeynmanState(
-              debate,
-              result.focus ?? "",
-              result.checkpoints,
-            ),
+            debate: finishFeynmanEvaluation(debate, result),
           };
           const completed = await completeInteractiveSession(understood, set);
           set({

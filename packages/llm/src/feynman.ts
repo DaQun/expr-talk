@@ -15,6 +15,21 @@ export type FeynmanTurnResult = {
   checkpoints: FeynmanCheckpoint[];
 };
 
+export const FEYNMAN_MAX_ROUNDS = 6;
+
+export function shouldCompleteFeynmanTurn(
+  currentRound: number,
+  understood: boolean,
+): boolean {
+  return understood || currentRound >= FEYNMAN_MAX_ROUNDS;
+}
+
+const CHECKPOINT_STATUS_RANK: Record<FeynmanCheckpoint["status"], number> = {
+  not_started: 0,
+  in_progress: 1,
+  understood: 2,
+};
+
 const ROLE_GUIDANCE: Record<FeynmanLearnerRole, string> = {
   child: "你是 10 岁小学生。用日常词汇提问，优先确认最基础的定义和直观例子。",
   student: "你是有一点基础的中学生。会追问步骤、因果关系和例子是否真的对应。",
@@ -29,7 +44,10 @@ const DIFFICULTY_GUIDANCE: Record<FeynmanDifficulty, string> = {
 };
 
 const SYSTEM = `你是一个好奇、诚实的中文初学者。用户正用费曼学习法向你解释一个概念。
+角色映射必须严格遵守：speaker=teacher 的文本全部是用户本人给你的讲解；speaker=learner 的文本是你之前提出的问题。不存在另一位老师，也不要把用户当成需要复述答案的学生。
 你只能根据用户在这场对话中已经说过的话判断，不能用自己已有知识补全缺失内容。
+你的任务是判断自己是否已经听懂用户的讲解。只要用户在任意一轮已经清楚说明某个检查点，就将它标为 understood；不得要求用户换句话复述自己已经讲清楚的相同内容。
+检查点是跨轮累积的：currentCheckpoints 中已经 understood 的项目不得降级；评估所有历史讲解，不要只看最后一轮。
 如果还不能理解，就只问一个最能暴露缺口的问题，优先问定义、因果机制、例子、边界或易混淆点；不要一次问多个问题，也不要替用户解释。
 只有当你已经能用自己的话说明这个概念是什么、为什么或怎样运作，并能联系到用户给出的例子或适用边界时，才判定理解。
 只输出合法 JSON，不要 Markdown：
@@ -105,7 +123,52 @@ export async function generateFeynmanTurn(
       throw new Error("首轮讲解必须先由小白提出一个追问");
     }
   }
+  result = {
+    ...result,
+    checkpoints: mergeFeynmanCheckpoints(
+      state.feynman?.checkpoints ?? [],
+      result.checkpoints,
+    ),
+  };
+  if (
+    !requireFollowup &&
+    result.checkpoints.every((checkpoint) => checkpoint.status === "understood")
+  ) {
+    result = {
+      ...result,
+      understood: true,
+      question: "",
+      focus: result.focus || "定义、原理、例子和适用边界都已经讲清楚",
+    };
+  }
   return result;
+}
+
+export function mergeFeynmanCheckpoints(
+  previous: FeynmanCheckpoint[],
+  incoming: FeynmanCheckpoint[],
+): FeynmanCheckpoint[] {
+  const previousById = new Map(previous.map((checkpoint) => [checkpoint.id, checkpoint]));
+  const incomingById = new Map(incoming.map((checkpoint) => [checkpoint.id, checkpoint]));
+
+  return (["definition", "mechanism", "example", "boundary"] as const).map(
+    (id) => {
+      const oldCheckpoint = previousById.get(id);
+      const newCheckpoint = incomingById.get(id);
+      if (!oldCheckpoint) return newCheckpoint ?? { id, status: "not_started" };
+      if (!newCheckpoint) return oldCheckpoint;
+      if (
+        CHECKPOINT_STATUS_RANK[oldCheckpoint.status] >
+        CHECKPOINT_STATUS_RANK[newCheckpoint.status]
+      ) {
+        return oldCheckpoint;
+      }
+      return {
+        ...newCheckpoint,
+        evidence: newCheckpoint.evidence || oldCheckpoint.evidence,
+      };
+    },
+  );
 }
 
 export function parseFeynmanTurnResult(raw: string): FeynmanTurnResult {
