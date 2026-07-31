@@ -1,8 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   setOpenAICompatibleTransport,
+  setOpenAICompatibleStreamTransport,
   type OpenAICompatibleTransportResponse,
 } from "@expr-talk/llm";
 import { AppProviders } from "./app/providers";
@@ -15,6 +17,23 @@ if ("__TAURI_INTERNALS__" in window) {
       request,
     }),
   );
+  setOpenAICompatibleStreamTransport(async (request, onChunk) => {
+    const requestId = request.requestId;
+    const unlisten = await listen<{ requestId: string; chunk: string }>(
+      "llm-stream-chunk",
+      (event) => {
+        if (event.payload.requestId === requestId) onChunk(event.payload.chunk);
+      },
+    );
+    try {
+      return await invoke<OpenAICompatibleTransportResponse>(
+        "llm_chat_completion",
+        { request },
+      );
+    } finally {
+      unlisten();
+    }
+  });
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

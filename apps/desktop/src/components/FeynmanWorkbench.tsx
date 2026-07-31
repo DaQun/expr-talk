@@ -8,6 +8,7 @@ import {
   MessageCircleQuestion,
   Mic,
   RefreshCw,
+  Sparkles,
 } from "lucide-react";
 import type {
   FeynmanCheckpoint,
@@ -22,15 +23,18 @@ import { PRACTICE_MODE_LABELS, PRACTICE_MODES } from "@expr-talk/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldGroup } from "@/components/ui/field";
 import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +51,7 @@ type FeynmanWorkbenchProps = {
   recording: boolean;
   waiting: boolean;
   analyzing: boolean;
+  streamedQuestion: string | null;
   pasteText: string;
   learnerRole: FeynmanLearnerRole;
   difficulty: FeynmanDifficulty;
@@ -54,7 +59,6 @@ type FeynmanWorkbenchProps = {
   recorderPanel: ReactNode;
   discardDialog?: ReactNode;
   guidance: ReactNode;
-  analyzeNote: string | null;
   error: string | null;
   onModeChange: (mode: PracticeMode) => void;
   onTopicCategoryChange: (category: string) => void;
@@ -137,6 +141,7 @@ export function FeynmanWorkbench({
   recording,
   waiting,
   analyzing,
+  streamedQuestion,
   pasteText,
   learnerRole,
   difficulty,
@@ -144,7 +149,6 @@ export function FeynmanWorkbench({
   recorderPanel,
   discardDialog,
   guidance,
-  analyzeNote,
   error,
   onModeChange,
   onTopicCategoryChange,
@@ -209,6 +213,7 @@ export function FeynmanWorkbench({
       <PageHeader
         title="费曼学习"
         description="把概念讲给小白听。小白只会根据你的讲解追问，直到能够自己复述。"
+        className="feynman-page-header"
         action={
           <Badge variant={modelReady === false ? "warning" : "success"}>
             ASR {modelReady === false ? "未就绪" : "就绪"}
@@ -218,68 +223,78 @@ export function FeynmanWorkbench({
 
       {guidance}
 
-      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_15.5rem]">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_14rem] xl:grid-cols-[minmax(0,1fr)_15rem]">
         <div className="flex min-w-0 flex-col gap-3">
           {!hasStarted && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">开始一场讲解</CardTitle>
+            <Card className="feynman-setup-card">
+              <CardHeader className="border-border/70 border-b pb-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <CardTitle className="text-base">开始一场讲解</CardTitle>
+                  <Badge variant="secondary">先设定，再讲解</Badge>
+                </div>
               </CardHeader>
-              <CardContent className="grid gap-4">
-                <div className="grid gap-3 md:grid-cols-[minmax(9rem,0.7fr)_minmax(0,1.3fr)]">
-                  <div className="space-y-2">
+              <CardContent className="pt-4">
+                <FieldGroup className="gap-5">
+                <div className="grid gap-4 lg:grid-cols-[minmax(9rem,0.7fr)_minmax(0,1.3fr)]">
+                  <Field>
                     <Label htmlFor="feynman-mode">训练模式</Label>
                     <Select value={draftMode} onValueChange={(value) => onModeChange(value as PracticeMode)}>
                       <SelectTrigger id="feynman-mode">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {PRACTICE_MODES.map((mode) => (
-                          <SelectItem key={mode} value={mode}>
-                            {PRACTICE_MODE_LABELS[mode]}
-                          </SelectItem>
-                        ))}
+                        <SelectGroup>
+                          {PRACTICE_MODES.map((mode) => (
+                            <SelectItem key={mode} value={mode}>
+                              {PRACTICE_MODE_LABELS[mode]}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-2">
+                  </Field>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field>
                       <Label htmlFor="feynman-topic-category">主题分类</Label>
                       <Select value={topicCategory} onValueChange={onTopicCategoryChange}>
                         <SelectTrigger id="feynman-topic-category">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {topicCategories.map((category) => (
-                            <SelectItem key={category} value={category}>
-                              {category}
-                            </SelectItem>
-                          ))}
+                          <SelectGroup>
+                            {topicCategories.map((category) => (
+                              <SelectItem key={category} value={category}>
+                                {category}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
                         </SelectContent>
                       </Select>
-                    </div>
-                    <div className="space-y-2">
+                    </Field>
+                    <Field>
                       <Label htmlFor="feynman-topic-pick">推荐主题</Label>
                       <Select value={topicId ?? "custom"} onValueChange={onTopicSelect}>
                         <SelectTrigger id="feynman-topic-pick">
                           <SelectValue placeholder="选择概念" />
                         </SelectTrigger>
                         <SelectContent>
-                          {topicId === null && <SelectItem value="custom" disabled>自定义概念</SelectItem>}
-                          {topics
-                            .filter((topic) => topicCategory === "全部" || topic.category === topicCategory)
-                            .map((topic) => (
-                              <SelectItem key={topic.id} value={topic.id}>
-                                {topic.title}
-                              </SelectItem>
-                            ))}
+                          <SelectGroup>
+                            {topicId === null && <SelectItem value="custom" disabled>自定义概念</SelectItem>}
+                            {topics
+                              .filter((topic) => topicCategory === "全部" || topic.category === topicCategory)
+                              .map((topic) => (
+                                <SelectItem key={topic.id} value={topic.id}>
+                                  {topic.title}
+                                </SelectItem>
+                              ))}
+                          </SelectGroup>
                         </SelectContent>
                       </Select>
-                    </div>
+                    </Field>
                   </div>
                 </div>
 
-                <div className="space-y-2">
+                <Field>
                   <Label htmlFor="feynman-topic">我要讲的概念</Label>
                   <Textarea
                     id="feynman-topic"
@@ -288,45 +303,50 @@ export function FeynmanWorkbench({
                     rows={3}
                     className="min-h-24"
                   />
-                </div>
+                </Field>
 
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field>
                     <Label htmlFor="feynman-role">小白是谁</Label>
                     <Select value={learnerRole} onValueChange={(value) => onLearnerRoleChange(value as FeynmanLearnerRole)}>
                       <SelectTrigger id="feynman-role">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {ROLE_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
+                        <SelectGroup>
+                          {ROLE_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
-                  </div>
-                  <div className="space-y-2">
+                  </Field>
+                  <Field>
                     <Label htmlFor="feynman-difficulty">追问难度</Label>
                     <Select value={difficulty} onValueChange={(value) => onDifficultyChange(value as FeynmanDifficulty)}>
                       <SelectTrigger id="feynman-difficulty">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {DIFFICULTY_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
+                        <SelectGroup>
+                          {DIFFICULTY_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
-                  </div>
+                  </Field>
                 </div>
+                </FieldGroup>
               </CardContent>
             </Card>
           )}
 
-          <Card className="min-h-0">
+          <Card className="feynman-conversation-card min-h-0">
             <CardHeader className="border-border border-b pb-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle className="text-base">讲解对话</CardTitle>
@@ -337,9 +357,14 @@ export function FeynmanWorkbench({
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="flex min-h-[22rem] flex-col gap-3 pt-4">
+            <CardContent
+              className={cn(
+                "flex flex-col gap-4 pt-4",
+                !conversationTurns.length && "min-h-[18rem]",
+              )}
+            >
               {conversationTurns.length ? (
-                <div className="border-border bg-muted/20 rounded-lg border px-3 py-2.5">
+                <div className="border-border bg-muted/35 rounded-lg border px-3 py-2.5">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground text-xs">
                       {historyExpanded ? "此前对话" : "上一条对话"}
@@ -356,7 +381,7 @@ export function FeynmanWorkbench({
                   {historyExpanded ? (
                     <div
                       ref={conversationRef}
-                      className="mt-2 max-h-[13rem] space-y-2 overflow-y-auto pr-1"
+                      className="mt-2 flex max-h-[18rem] flex-col gap-2 overflow-y-auto pr-1"
                     >
                       {conversationTurns.map((turn) => (
                         <div
@@ -383,8 +408,11 @@ export function FeynmanWorkbench({
                   )}
                 </div>
               ) : (
-                <div className="text-muted-foreground flex min-h-24 flex-1 items-center justify-center text-center text-sm leading-relaxed">
-                  选择一个概念，用自己的话从定义开始讲。
+                <div className="text-muted-foreground flex min-h-32 flex-1 items-center justify-center text-center text-sm leading-relaxed">
+                  <div className="flex max-w-xs flex-col items-center gap-2">
+                    <Sparkles className="text-primary size-5" aria-hidden />
+                    <span>选择一个概念，用自己的话从定义开始讲。</span>
+                  </div>
                 </div>
               )}
 
@@ -397,30 +425,38 @@ export function FeynmanWorkbench({
                 </div>
               )}
 
+              {analyzing && !pendingQuestion && (
+                <div className="border-warning/35 bg-warning/10 rounded-lg border px-3.5 py-3" role="status">
+                  <div className="text-warning-foreground mb-1 flex items-center gap-1.5 text-xs font-medium">
+                    <MessageCircleQuestion className="size-3.5" /> 小白正在组织问题
+                  </div>
+                  <p className="m-0 text-sm leading-relaxed">
+                    {streamedQuestion || "正在根据你的讲解整理一个最关键的问题…"}
+                    <span className="ml-1 inline-block size-1.5 animate-pulse rounded-full bg-warning align-middle" aria-hidden />
+                  </p>
+                </div>
+              )}
+
               {!showingCompleted && (
-                <div className="border-border bg-muted/25 mt-auto rounded-lg border p-3">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="border-border bg-muted/30 mt-auto rounded-lg border p-3.5">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <Label className="text-foreground">{inputMode === "text" ? "用文字讲解" : "用语音讲解"}</Label>
-                    <div className="bg-background flex items-center gap-1 rounded-lg border border-border p-1" role="group" aria-label="讲解输入方式">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={inputMode === "text" ? "default" : "ghost"}
-                        disabled={recording}
-                        onClick={() => setInputMode("text")}
-                      >
-                        <Keyboard /> 文字
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={inputMode === "voice" ? "default" : "ghost"}
-                        disabled={recording}
-                        onClick={() => setInputMode("voice")}
-                      >
-                        <Mic /> 语音
-                      </Button>
-                    </div>
+                    <ToggleGroup
+                      type="single"
+                      value={inputMode}
+                      onValueChange={(value) => {
+                        if (value) setInputMode(value as InputMode);
+                      }}
+                      disabled={recording}
+                      aria-label="讲解输入方式"
+                    >
+                      <ToggleGroupItem value="text" aria-label="文字输入">
+                        <Keyboard data-icon="inline-start" /> 文字
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="voice" aria-label="语音输入">
+                        <Mic data-icon="inline-start" /> 语音
+                      </ToggleGroupItem>
+                    </ToggleGroup>
                   </div>
 
                   {inputMode === "text" ? (
@@ -430,8 +466,8 @@ export function FeynmanWorkbench({
                         onChange={(event) => onPasteTextChange(event.target.value)}
                         placeholder={pendingQuestion ? "直接回答小白刚才的问题…" : "直接讲给小白听…"}
                         disabled={analyzing || recording || isComplete}
-                        rows={5}
-                        className="min-h-32"
+                        rows={4}
+                        className="min-h-28"
                       />
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button disabled={!canSubmitText || recording} onClick={onSubmitText}>
@@ -477,12 +513,17 @@ export function FeynmanWorkbench({
           </Card>
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-6">
+        <aside className="feynman-progress-rail flex min-w-0 flex-col gap-3 lg:sticky lg:top-6">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">理解检查点</CardTitle>
+            <CardHeader className="border-border/70 border-b pb-4">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-base">理解检查点</CardTitle>
+                <Badge variant="secondary">
+                  {checkpoints.filter((checkpoint) => checkpoint.status === "understood").length}/4
+                </Badge>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="flex flex-col gap-2.5 pt-4">
               {CHECKPOINTS.map((definition) => {
                 const checkpoint = checkpointById.get(definition.id) ?? {
                   id: definition.id,
@@ -491,18 +532,18 @@ export function FeynmanWorkbench({
                 const status = CHECKPOINT_STATUS[checkpoint.status];
                 const Icon = status.Icon;
                 return (
-                  <div key={definition.id} className="border-border border-b pb-3 last:border-b-0 last:pb-0">
+                  <div key={definition.id} className="border-border/70 border-b pb-2.5 last:border-b-0 last:pb-0">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <p className="m-0 text-sm font-medium">{definition.label}</p>
-                        <p className="text-muted-foreground mt-0.5 mb-0 text-xs leading-relaxed">{definition.description}</p>
+                        <p className="text-muted-foreground mt-0.5 mb-0 text-xs leading-snug">{definition.description}</p>
                       </div>
                       <span className={cn("inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs", status.className)}>
                         <Icon className="size-3" /> {status.label}
                       </span>
                     </div>
                     {checkpoint.evidence && (
-                      <p className="text-muted-foreground mt-2 mb-0 text-xs leading-relaxed">{checkpoint.evidence}</p>
+                      <p className="text-muted-foreground mt-1.5 mb-0 text-xs leading-snug">{checkpoint.evidence}</p>
                     )}
                   </div>
                 );
@@ -511,10 +552,10 @@ export function FeynmanWorkbench({
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="border-border/70 border-b pb-4">
               <CardTitle className="text-base">本场设定</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm">
+            <CardContent className="flex flex-col gap-3 pt-4 text-sm">
               <div>
                 <p className="text-muted-foreground m-0 text-xs">小白角色</p>
                 <p className="mt-1 mb-0">{roleLabel(activeRole)}</p>
@@ -533,11 +574,6 @@ export function FeynmanWorkbench({
         </aside>
       </div>
 
-      {analyzeNote && (
-        <p className="text-muted-foreground m-0 text-sm" role="status">
-          {analyzeNote}
-        </p>
-      )}
       {error && (
         <div className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-3.5 py-3 text-sm">
           {error}

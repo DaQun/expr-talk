@@ -10,6 +10,7 @@ export type OpenAICompatibleTransportRequest = {
   url: string;
   apiKey?: string;
   body: Record<string, unknown>;
+  requestId?: string;
 };
 
 export type OpenAICompatibleTransportResponse = {
@@ -22,13 +23,26 @@ export type OpenAICompatibleTransport = (
   request: OpenAICompatibleTransportRequest,
 ) => Promise<OpenAICompatibleTransportResponse>;
 
+export type OpenAICompatibleStreamTransport = (
+  request: OpenAICompatibleTransportRequest,
+  onChunk: (chunk: string) => void,
+) => Promise<OpenAICompatibleTransportResponse>;
+
 let nativeTransport: OpenAICompatibleTransport | null = null;
+let nativeStreamTransport: OpenAICompatibleStreamTransport | null = null;
 
 /** 桌面壳注入原生 HTTP transport；浏览器模式保留 fetch。 */
 export function setOpenAICompatibleTransport(
   transport: OpenAICompatibleTransport | null,
 ): void {
   nativeTransport = transport;
+}
+
+/** 桌面端通过 Tauri event 转发 SSE 字节块；浏览器端直接使用 fetch ReadableStream。 */
+export function setOpenAICompatibleStreamTransport(
+  transport: OpenAICompatibleStreamTransport | null,
+): void {
+  nativeStreamTransport = transport;
 }
 
 function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -186,6 +200,51 @@ export async function chatCompletion(
     console.groupEnd();
   }
 
+  if (nativeStreamTransport && options?.stream) {
+    const stream = createCompletionStreamCollector(
+      options.onProgress,
+      debug,
+      requestId,
+      startedAt,
+    );
+    let receivedChunk = false;
+    let nativeResponse: OpenAICompatibleTransportResponse;
+    try {
+      nativeResponse = await withAbort(
+        nativeStreamTransport(
+          { url, apiKey: config.apiKey, body, requestId },
+          (chunk) => {
+            receivedChunk = true;
+            stream.push(chunk);
+          },
+        ),
+        options.signal,
+      );
+    } catch (error) {
+      if (debug) {
+        console.error(`[LLM][${requestId}] native stream error`, {
+          durationMs: Math.round(performance.now() - startedAt),
+          error,
+        });
+      }
+      throw error;
+    }
+
+    if (nativeResponse.status < 200 || nativeResponse.status >= 300) {
+      throw new Error(
+        `LLM HTTP ${nativeResponse.status}: ${nativeResponse.body.slice(0, 300)}`,
+      );
+    }
+
+    if (nativeResponse.contentType.includes("text/event-stream")) {
+      // 某些服务端会声明 SSE 却一次性回传；此时仍能从最终 body 恢复内容。
+      if (!receivedChunk && nativeResponse.body) stream.push(nativeResponse.body);
+      return stream.finish();
+    }
+
+    return readCompletionBody(nativeResponse.body, debug, requestId, startedAt);
+  }
+
   let res: Response;
   try {
     if (nativeTransport) {
@@ -194,6 +253,7 @@ export async function chatCompletion(
           url,
           apiKey: config.apiKey,
           body,
+          requestId,
         }),
         options?.signal,
       );
@@ -232,10 +292,17 @@ export async function chatCompletion(
   }
 
   const responseText = await res.text().catch(() => "");
+  return readCompletionBody(responseText, debug, requestId, startedAt);
+}
+
+function readCompletionBody(
+  responseText: string,
+  debug: boolean,
+  requestId: string,
+  startedAt: number,
+): string {
   if (debug) {
     console.info(`[LLM][${requestId}] response`, {
-      status: res.status,
-      statusText: res.statusText,
       durationMs: Math.round(performance.now() - startedAt),
       body: responseText,
     });
@@ -263,6 +330,27 @@ async function readCompletionStream(
 ): Promise<string> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
+  const stream = createCompletionStreamCollector(
+    onProgress,
+    debug,
+    requestId,
+    startedAt,
+  );
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value) stream.push(decoder.decode(value, { stream: !done }));
+    if (done) break;
+  }
+  return stream.finish();
+}
+
+function createCompletionStreamCollector(
+  onProgress: ((progress: LLMStreamProgress) => void) | undefined,
+  debug: boolean,
+  requestId: string,
+  startedAt: number,
+) {
   let buffer = "";
   let content = "";
   let reasoning = "";
@@ -274,6 +362,8 @@ async function readCompletionStream(
     onProgress?.({
       phase: "streaming",
       receivedChars: content.length + reasoning.length,
+      content,
+      reasoning,
     });
   };
 
@@ -296,10 +386,7 @@ async function readCompletionStream(
     emitProgress();
   };
 
-  onProgress?.({ phase: "streaming", receivedChars: 0 });
-  while (true) {
-    const { done, value } = await reader.read();
-    const chunk = decoder.decode(value, { stream: !done });
+  const push = (chunk: string) => {
     rawResponse += chunk;
     buffer = `${buffer}${chunk}`.replace(
       /\r\n/g,
@@ -315,30 +402,35 @@ async function readCompletionStream(
       newline = buffer.indexOf("\n");
     }
 
-    if (done) break;
-  }
-  if (buffer.startsWith("data:")) dataLines.push(buffer.slice(5).trimStart());
-  processEvent();
+  };
 
-  let result = usableCompletionText({ content, reasoning });
-  if (!result) {
-    try {
-      result = usableCompletionText(readCompletionText(JSON.parse(rawResponse)));
-    } catch {
-      // 这是标准 SSE 文本，完整内容本身不是 JSON。
+  const finish = (): string => {
+    if (buffer.startsWith("data:")) dataLines.push(buffer.slice(5).trimStart());
+    processEvent();
+
+    let result = usableCompletionText({ content, reasoning });
+    if (!result) {
+      try {
+        result = usableCompletionText(readCompletionText(JSON.parse(rawResponse)));
+      } catch {
+        // 这是标准 SSE 文本，完整内容本身不是 JSON。
+      }
     }
-  }
 
-  if (debug) {
-    console.info(`[LLM][${requestId}] stream complete`, {
-      durationMs: Math.round(performance.now() - startedAt),
-      receivedChars: content.length + reasoning.length,
-      eventCount,
-      recoveredFromJson: Boolean(result) && !content.trim() && !reasoning.trim(),
-    });
-  }
-  if (result) return result;
-  throw new Error("LLM 流式响应结束，但未返回可用内容");
+    if (debug) {
+      console.info(`[LLM][${requestId}] stream complete`, {
+        durationMs: Math.round(performance.now() - startedAt),
+        receivedChars: content.length + reasoning.length,
+        eventCount,
+        recoveredFromJson: Boolean(result) && !content.trim() && !reasoning.trim(),
+      });
+    }
+    if (result) return result;
+    throw new Error("LLM 流式响应结束，但未返回可用内容");
+  };
+
+  onProgress?.({ phase: "streaming", receivedChars: 0, content: "", reasoning: "" });
+  return { push, finish };
 }
 
 export async function testOpenAICompatible(

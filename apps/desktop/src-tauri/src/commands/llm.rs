@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
+use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +51,7 @@ pub struct LlmChatRequest {
     pub url: String,
     pub api_key: Option<String>,
     pub body: Value,
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -58,6 +60,45 @@ pub struct LlmChatResponse {
     pub status: u16,
     pub content_type: String,
     pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LlmStreamChunkPayload {
+    request_id: String,
+    chunk: String,
+}
+
+/// Keep incomplete UTF-8 code points between network reads so forwarded SSE
+/// chunks are valid JavaScript strings. A malformed final sequence is still
+/// surfaced lossily instead of silently dropping response bytes.
+fn drain_utf8_chunk(bytes: &mut Vec<u8>, flush: bool) -> Option<String> {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => {
+            if text.is_empty() {
+                return None;
+            }
+            let text = text.to_owned();
+            bytes.clear();
+            Some(text)
+        }
+        Err(error) if !flush && error.error_len().is_none() => {
+            let valid_up_to = error.valid_up_to();
+            if valid_up_to == 0 {
+                return None;
+            }
+            let text = std::str::from_utf8(&bytes[..valid_up_to])
+                .expect("valid UTF-8 prefix")
+                .to_owned();
+            bytes.drain(..valid_up_to);
+            Some(text)
+        }
+        Err(_) => {
+            let text = String::from_utf8_lossy(bytes).into_owned();
+            bytes.clear();
+            (!text.is_empty()).then_some(text)
+        }
+    }
 }
 
 fn validate_completion_url(raw: &str) -> Result<url::Url, String> {
@@ -166,7 +207,10 @@ pub async fn llm_list_models(
 }
 
 #[tauri::command]
-pub async fn llm_chat_completion(request: LlmChatRequest) -> Result<LlmChatResponse, String> {
+pub async fn llm_chat_completion(
+    app: AppHandle,
+    request: LlmChatRequest,
+) -> Result<LlmChatResponse, String> {
     let url = validate_completion_url(&request.url)?;
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
@@ -182,7 +226,7 @@ pub async fn llm_chat_completion(request: LlmChatRequest) -> Result<LlmChatRespo
         builder = builder.bearer_auth(api_key);
     }
 
-    let response = builder
+    let mut response = builder
         .send()
         .await
         .map_err(|e| format!("LLM 原生请求失败：{e}"))?;
@@ -193,10 +237,45 @@ pub async fn llm_chat_completion(request: LlmChatRequest) -> Result<LlmChatRespo
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| format!("读取 LLM 响应失败：{e}"))?;
+    let body = if content_type.contains("text/event-stream") {
+        let request_id = request.request_id.unwrap_or_default();
+        let mut body_bytes = Vec::new();
+        let mut pending_utf8 = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| format!("读取 LLM 流式响应失败：{e}"))?
+        {
+            body_bytes.extend_from_slice(&chunk);
+            pending_utf8.extend_from_slice(&chunk);
+            if let Some(chunk) = drain_utf8_chunk(&mut pending_utf8, false) {
+                if !request_id.is_empty() {
+                    let _ = app.emit(
+                        "llm-stream-chunk",
+                        LlmStreamChunkPayload {
+                            request_id: request_id.clone(),
+                            chunk,
+                        },
+                    );
+                }
+            }
+        }
+        if let Some(chunk) = drain_utf8_chunk(&mut pending_utf8, true) {
+            if !request_id.is_empty() {
+                let _ = app.emit(
+                    "llm-stream-chunk",
+                    LlmStreamChunkPayload { request_id, chunk },
+                );
+            }
+        }
+        String::from_utf8(body_bytes)
+            .unwrap_or_else(|error| String::from_utf8_lossy(&error.into_bytes()).into_owned())
+    } else {
+        response
+            .text()
+            .await
+            .map_err(|e| format!("读取 LLM 响应失败：{e}"))?
+    };
 
     Ok(LlmChatResponse {
         status,
@@ -207,7 +286,24 @@ pub async fn llm_chat_completion(request: LlmChatRequest) -> Result<LlmChatRespo
 
 #[cfg(test)]
 mod tests {
-    use super::{build_models_url, parse_model_list, validate_completion_url};
+    use super::{build_models_url, drain_utf8_chunk, parse_model_list, validate_completion_url};
+
+    #[test]
+    fn forwards_only_complete_utf8_sequences() {
+        let word = "\u{4e2d}\u{6587}";
+        let source = format!("data: {{\"text\":\"{word}\"}}\n\n");
+        let word_start = source.find(word).expect("word is present");
+        let mut buffer = source.as_bytes()[..word_start + 1].to_vec();
+
+        let first = drain_utf8_chunk(&mut buffer, false).expect("ASCII prefix is valid");
+        assert_eq!(first, &source[..word_start]);
+        assert_eq!(buffer, &source.as_bytes()[word_start..word_start + 1]);
+
+        buffer.extend_from_slice(&source.as_bytes()[word_start + 1..]);
+        let second = drain_utf8_chunk(&mut buffer, false).expect("remaining bytes are valid");
+        assert_eq!(format!("{first}{second}"), source);
+        assert!(buffer.is_empty());
+    }
 
     #[test]
     fn accepts_http_completion_urls() {

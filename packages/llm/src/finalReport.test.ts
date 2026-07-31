@@ -4,6 +4,7 @@ import { parseStructuredReport } from "./finalReport";
 import {
   chatCompletion,
   setOpenAICompatibleTransport,
+  setOpenAICompatibleStreamTransport,
 } from "./openai_compatible";
 import { parseDebateTurnResult } from "./debate";
 import { parseFeynmanTurnResult } from "./feynman";
@@ -184,6 +185,44 @@ test("uses an injected native transport instead of fetch", async () => {
     assert.equal(content, "pong");
   } finally {
     setOpenAICompatibleTransport(null);
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("streams native transport chunks into cumulative progress", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error("fetch should not be called");
+  };
+  const progress: string[] = [];
+  setOpenAICompatibleStreamTransport(async (request, onChunk) => {
+    assert.equal(request.url, "https://example.test/v1/chat/completions");
+    onChunk(
+      `data: ${JSON.stringify({
+        choices: [{ delta: { content: '{"question":"' } }],
+      })}\n\n`,
+    );
+    onChunk(
+      `data: ${JSON.stringify({
+        choices: [{ delta: { content: '中文问题"}' } }],
+      })}\n\ndata: [DONE]\n\n`,
+    );
+    return { status: 200, contentType: "text/event-stream", body: "" };
+  });
+
+  try {
+    const content = await chatCompletion(
+      { providerId: "custom", baseUrl: "https://example.test/v1", apiKey: "test" },
+      [{ role: "user", content: "test" }],
+      {
+        stream: true,
+        onProgress: ({ content: partial = "" }) => progress.push(partial),
+      },
+    );
+    assert.equal(content, '{"question":"中文问题"}');
+    assert.deepEqual(progress, ["", '{"question":"', '{"question":"中文问题"}']);
+  } finally {
+    setOpenAICompatibleStreamTransport(null);
     globalThis.fetch = originalFetch;
   }
 });

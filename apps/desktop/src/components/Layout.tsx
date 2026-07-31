@@ -49,30 +49,30 @@ export function Layout() {
   return (
     <div
       className={cn(
-        "grid min-h-screen transition-[grid-template-columns] duration-200 md:grid-cols-[232px_minmax(0,1fr)]",
-        sidebarCollapsed && "md:grid-cols-[72px_minmax(0,1fr)]",
+        "grid min-h-screen bg-background transition-[grid-template-columns] duration-200 md:grid-cols-[216px_minmax(0,1fr)]",
+        sidebarCollapsed && "md:grid-cols-[64px_minmax(0,1fr)]",
       )}
     >
       <aside
         className={cn(
-          "border-sidebar-border bg-sidebar/90 text-sidebar-foreground sticky top-0 z-10 flex h-auto flex-col gap-5 border-b p-4 backdrop-blur-xl md:h-screen md:border-r md:border-b-0 md:p-5",
+          "border-sidebar-border bg-sidebar text-sidebar-foreground sticky top-0 z-10 flex h-auto flex-col gap-4 border-b p-3 md:h-screen md:border-r md:border-b-0 md:p-3",
           sidebarCollapsed && "md:items-center md:px-3",
         )}
       >
         <div
           className={cn(
-            "flex w-full items-center justify-between gap-3 px-1 py-0.5",
+            "flex w-full items-center justify-between gap-2 px-1 py-0.5",
             sidebarCollapsed && "md:flex-col md:justify-center md:gap-2 md:px-0",
           )}
         >
           <div
             className={cn(
-              "flex min-w-0 items-center gap-3",
+              "flex min-w-0 items-center gap-2.5",
               sidebarCollapsed && "md:justify-center",
             )}
           >
             <div
-              className="from-primary via-primary to-primary/80 text-primary-foreground grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-sm font-bold shadow-[0_4px_14px_oklch(0.72_0.11_82_/_30%)]"
+              className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-md text-sm font-bold"
               aria-hidden
             >
               E
@@ -140,11 +140,11 @@ export function Layout() {
                 }}
                 className={({ isActive }) =>
                   cn(
-                    "text-muted-foreground group relative flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-all duration-200",
+                    "text-muted-foreground group relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
                     sidebarCollapsed && "md:size-10 md:justify-center md:px-0",
                     "hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground",
                     isActive &&
-                      "bg-sidebar-accent text-sidebar-accent-foreground font-medium shadow-[inset_0_0_0_1px_oklch(0.72_0.11_82_/_22%)]",
+                      "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
                     blocked && "pointer-events-none opacity-40",
                   )
                 }
@@ -176,7 +176,7 @@ export function Layout() {
 
         <div
           className={cn(
-            "text-muted-foreground mt-auto hidden rounded-xl border border-sidebar-border/70 bg-sidebar-accent/30 p-3.5 text-[0.7rem] leading-relaxed md:block",
+            "text-muted-foreground mt-auto hidden rounded-md border border-sidebar-border/70 bg-sidebar-accent/30 p-3 text-[0.7rem] leading-relaxed md:block",
             sidebarCollapsed && "md:hidden",
           )}
         >
@@ -189,7 +189,7 @@ export function Layout() {
         </div>
       </aside>
 
-      <main className="relative min-w-0 w-full max-w-5xl px-4 py-6 pb-14 md:px-8 md:py-9">
+      <main className="relative min-w-0 w-full max-w-[1440px] justify-self-center px-4 py-6 pb-14 md:px-7 md:py-8">
         <Outlet />
       </main>
     </div>

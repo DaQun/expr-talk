@@ -59,6 +59,8 @@ type SessionState = {
   analyzing: boolean;
   error: string | null;
   analyzeNote: string | null;
+  /** 正在生成的交互式模型回复；完成后才写入正式对话记录。 */
+  streamedQuestion: string | null;
   level: number;
   lastWavUrl: string | null;
   lastAudioPath: string | null;
@@ -135,6 +137,36 @@ function createLlmProgressReporter(
             ? `正在接收评审内容… ${receivedChars} 字`
             : "大模型已连接，等待生成内容…";
     set({ analyzeNote });
+  };
+}
+
+function extractStreamedQuestion(content?: string): string | null {
+  if (!content?.trim()) return null;
+  const match = content.match(/"question"\s*:\s*"((?:\\.|[^"\\])*)/);
+  if (!match) return null;
+
+  try {
+    const question = JSON.parse(`"${match[1]}"`);
+    return typeof question === "string" && question.trim() ? question : null;
+  } catch {
+    return match[1]
+      .replace(/\\n/g, "\n")
+      .replace(/\\"/g, '"')
+      .trim() || null;
+  }
+}
+
+function createInteractiveProgressReporter(
+  set: (partial: Partial<SessionState>) => void,
+): (progress: LLMStreamProgress) => void {
+  const reportProgress = createLlmProgressReporter(set);
+  let lastPreview = "";
+  return (progress) => {
+    reportProgress(progress);
+    const preview = extractStreamedQuestion(progress.content);
+    if (!preview || preview === lastPreview) return;
+    lastPreview = preview;
+    set({ streamedQuestion: preview });
   };
 }
 
@@ -411,6 +443,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   analyzing: false,
   error: null,
   analyzeNote: null,
+  streamedQuestion: null,
   level: 0,
   lastWavUrl: null,
   lastAudioPath: null,
@@ -488,6 +521,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       retryParentId: null,
       error: null,
       analyzeNote: null,
+      streamedQuestion: null,
       level: 0,
       liveSegments: [],
       partialText: "",
@@ -573,6 +607,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         comparison: null,
         error: null,
         analyzeNote: `第 ${next.debate?.currentRound ?? 2} 轮回应 · 请回应${interactiveQuestionLabel(current.mode)}`,
+        streamedQuestion: null,
         level: 0,
         liveSegments: [],
         partialText: "",
@@ -672,6 +707,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         pasteText: "",
         error: null,
         analyzeNote: null,
+        streamedQuestion: null,
         level: 0,
         liveSegments: [],
         partialText: "",
@@ -1111,7 +1147,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         try {
           const result = await generateInteractiveQuestion(
             sessionForAnalyze,
-            createLlmProgressReporter(set),
+            createInteractiveProgressReporter(set),
           );
           if (result.understood) {
             sessionForAnalyze = {
@@ -1154,6 +1190,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
               partialText: "",
               level: 0,
               analyzing: false,
+              streamedQuestion: null,
               analyzeNote: `第 ${round} 轮${questionLabel}已到`,
               error: null,
             });
@@ -1172,6 +1209,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           set({
             current: waiting,
             analyzing: false,
+            streamedQuestion: null,
             error: msg,
             analyzeNote: `${questionLabel}生成失败，可重试`,
             liveSegments: [],
@@ -1289,11 +1327,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const current = get().current;
     if (!current?.debate || !isInteractiveMode(current.mode)) return;
     const questionLabel = interactiveQuestionLabel(current.mode);
-    set({ analyzing: true, error: null, analyzeNote: `${questionLabel}生成中…` });
+    set({
+      analyzing: true,
+      error: null,
+      analyzeNote: `${questionLabel}生成中…`,
+      streamedQuestion: null,
+    });
     try {
       const result = await generateInteractiveQuestion(
         current,
-        createLlmProgressReporter(set),
+        createInteractiveProgressReporter(set),
       );
       if (result.understood) {
         set({ analyzeNote: "小白已经听懂，正在生成整场复盘…" });
@@ -1311,6 +1354,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           report: completed.report,
           comparison: null,
           analyzing: false,
+          streamedQuestion: null,
           analyzeNote: "完成：费曼学习复盘",
           error: null,
         });
@@ -1337,12 +1381,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         failureReason: undefined,
       };
       await api.updateSession(waiting);
-      set({ current: waiting, analyzing: false, analyzeNote: `${questionLabel}已到` });
+      set({
+        current: waiting,
+        analyzing: false,
+        analyzeNote: `${questionLabel}已到`,
+        streamedQuestion: null,
+      });
     } catch (e) {
       set({
         analyzing: false,
         error: e instanceof Error ? e.message : String(e),
         analyzeNote: `${questionLabel}生成失败，可重试`,
+        streamedQuestion: null,
       });
     }
   },
@@ -1371,7 +1421,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
 
     const questionLabel = interactiveQuestionLabel(current.mode);
-    set({ analyzing: true, error: null, analyzeNote: "正在提交本轮文字回应…" });
+    set({
+      analyzing: true,
+      error: null,
+      analyzeNote: "正在提交本轮文字回应…",
+      streamedQuestion: null,
+    });
     const round = current.debate.currentRound + 1;
     const debateWithUser: DebateState = {
       ...current.debate,
@@ -1414,7 +1469,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ current: updated, analyzeNote: `${questionLabel}生成中 · 第 ${round} 轮` });
       const result = await generateInteractiveQuestion(
         updated,
-        createLlmProgressReporter(set),
+        createInteractiveProgressReporter(set),
       );
       if (result.understood) {
         set({ analyzeNote: "小白已经听懂，正在生成整场复盘…" });
@@ -1435,6 +1490,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           analyzing: false,
           analyzeNote: "完成：费曼学习复盘",
           error: null,
+          streamedQuestion: null,
         });
         return true;
       }
@@ -1465,6 +1521,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         analyzing: false,
         analyzeNote: `第 ${round} 轮${questionLabel}已到`,
         error: null,
+        streamedQuestion: null,
       });
       return false;
     } catch (e) {
@@ -1481,6 +1538,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         analyzing: false,
         error: msg,
         analyzeNote: "本轮提交失败，内容已保留",
+        streamedQuestion: null,
       });
       return false;
     }
@@ -1512,7 +1570,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   analyzePaste: async () => {
     if (get().analyzing) return;
-    set({ analyzing: true, error: null, analyzeNote: "分析粘贴文本…" });
+    set({
+      analyzing: true,
+      error: null,
+      analyzeNote: "分析粘贴文本…",
+      streamedQuestion: null,
+    });
     let pastedSession: TrainingSession | null = null;
     try {
       const text = get().pasteText.trim();
@@ -1566,10 +1629,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           inputSource: "paste",
         };
         await api.updateSession(stopped);
-        set({ current: stopped, analyzeNote: `${questionLabel}生成中…` });
+        set({
+          current: stopped,
+          analyzeNote: `${questionLabel}生成中…`,
+          streamedQuestion: null,
+        });
         const result = await generateInteractiveQuestion(
           stopped,
-          createLlmProgressReporter(set),
+          createInteractiveProgressReporter(set),
         );
         if (result.understood) {
           set({ analyzeNote: "小白已经听懂，正在生成整场复盘…" });
@@ -1590,6 +1657,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             analyzeNote: "完成：费曼学习复盘",
             pasteText: "",
             error: null,
+            streamedQuestion: null,
           });
           return;
         }
@@ -1620,6 +1688,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           analyzeNote: `第 1 轮${questionLabel}已到`,
           pasteText: "",
           error: null,
+          streamedQuestion: null,
         });
         return;
       }
@@ -1654,6 +1723,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({
         error: msg,
         report: null,
+        streamedQuestion: null,
       });
     } finally {
       set({ analyzing: false });

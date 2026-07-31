@@ -56,6 +56,7 @@ export function PracticePage() {
     analyzing,
     error,
     analyzeNote,
+    streamedQuestion,
     level,
     liveSegments,
     partialText,
@@ -474,6 +475,7 @@ export function PracticePage() {
         recording={recording}
         waiting={debateWaiting}
         analyzing={analyzing}
+        streamedQuestion={streamedQuestion}
         pasteText={pasteText}
         learnerRole={feynmanLearnerRole}
         difficulty={feynmanDifficulty}
@@ -485,11 +487,6 @@ export function PracticePage() {
             title={recording ? "录音中提示" : "开始前检查"}
             items={guidance.filter((item) => item.id !== "ready")}
           />
-        }
-        analyzeNote={
-          analyzeNote
-            ? `${analyzeNote}${analyzing ? ` · 已等待 ${analyzeElapsed} 秒` : ""}`
-            : null
         }
         error={error}
         onModeChange={setDraftMode}
