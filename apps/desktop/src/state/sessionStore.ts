@@ -80,11 +80,11 @@ type SessionState = {
   setFeynmanDifficulty: (difficulty: FeynmanDifficulty) => void;
   refreshModelStatus: () => Promise<void>;
   createAndStart: () => Promise<void>;
-  /** 从父 session 发起复练并开始录音 */
+  /** 从父 session 创建复练，等待用户选择输入方式并开始。 */
   startRetry: (parentSessionId: string) => Promise<boolean>;
   /** 录音中丢弃本轮音轨与字幕，保留题目/目标/复练关系后重新开始 */
   rerecord: () => Promise<void>;
-  /** 放弃当前录音：停麦、不分析、回到可开始状态（保留题目草稿） */
+  /** 放弃整场未完成训练：停麦、删除素材和记录，保留题目草稿。 */
   discardRecording: () => Promise<void>;
   /** 返回 true 时应进入复盘；false 表示辩论仍在进行。 */
   stopAndAnalyze: () => Promise<boolean>;
@@ -488,37 +488,46 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     startLock = true;
     const draftMode = normalizePracticeMode(get().draftMode);
 
-    // 普通练习：清掉复练上下文（除非 startRetry 刚设过，由 startRetry 自己建 session）
-    const provisional: TrainingSession = {
-      id: localId(),
-      mode: draftMode,
-      topic: get().draftTopic,
-      goal: get().draftGoal,
-      status: "recording",
-      startedAt: new Date().toISOString(),
-      liveTranscript: [],
-      round: 1,
-      ...(isInteractiveMode(draftMode)
-        ? {
-            debate: initialDebateState(
-              draftMode,
-              draftMode === "feynman"
-                ? {
-                    learnerRole: get().feynmanLearnerRole,
-                    difficulty: get().feynmanDifficulty,
-                  }
-                : undefined,
-            ),
-          }
-        : {}),
-    };
+    const pendingRetry = get().current;
+    const shouldResumeRetry =
+      pendingRetry?.status === "created" && Boolean(pendingRetry.parentSessionId);
+    const provisional: TrainingSession = shouldResumeRetry
+      ? {
+          ...pendingRetry,
+          status: "recording",
+          startedAt: new Date().toISOString(),
+          liveTranscript: [],
+        }
+      : {
+          id: localId(),
+          mode: draftMode,
+          topic: get().draftTopic,
+          goal: get().draftGoal,
+          status: "recording",
+          startedAt: new Date().toISOString(),
+          liveTranscript: [],
+          round: 1,
+          ...(isInteractiveMode(draftMode)
+            ? {
+                debate: initialDebateState(
+                  draftMode,
+                  draftMode === "feynman"
+                    ? {
+                        learnerRole: get().feynmanLearnerRole,
+                        difficulty: get().feynmanDifficulty,
+                      }
+                    : undefined,
+                ),
+              }
+            : {}),
+        };
 
     revokeLastWavUrl(get().lastWavUrl);
     set({
       current: provisional,
       report: null,
       comparison: null,
-      retryParentId: null,
+      retryParentId: provisional.parentSessionId ?? null,
       error: null,
       analyzeNote: null,
       streamedQuestion: null,
@@ -672,7 +681,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         mode,
         topic,
         goal: parent.goal,
-        status: "recording",
+        status: "created",
         startedAt: new Date().toISOString(),
         liveTranscript: [],
         parentSessionId: parent.id,
@@ -713,7 +722,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         partialText: "",
         lastWavUrl: null,
         lastAudioPath: null,
-        asrStatus: `复练第 ${round} 轮 · 请求麦克风…`,
+        asrStatus: `复练第 ${round} 轮 · 等待开始录音`,
       });
 
       if (activeRecorder) {
@@ -725,24 +734,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         activeRecorder = null;
       }
 
-      const { asrProvider, asrConfig } = await resolveAsrOptions();
-      const recorder = new MicRecorder({
-        sessionId: provisional.id,
-        enableAsr: true,
-        asrProvider,
-        asrConfig,
-        onLevel: (rms) => set({ level: rms }),
-        onError: (err) => set({ error: err.message }),
-        onAsrEvent: (ev) => applyAsrEvent(get, set, ev),
-        onStatus: (msg) => set({ asrStatus: msg }),
-      });
-
-      await recorder.startLocalOnly();
-      activeRecorder = recorder;
       await api.updateSession(provisional);
-      window.setTimeout(() => {
-        void recorder.connectBackend();
-      }, 50);
       return true;
     } catch (e) {
       if (activeRecorder) {
@@ -847,7 +839,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   discardRecording: async () => {
     if (startLock || get().analyzing) return;
     const current = get().current;
-    if (!current || current.status !== "recording") return;
+    if (!current || current.status === "reviewed") return;
 
     startLock = true;
     try {
@@ -858,33 +850,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           // 放弃本轮，停止失败也清状态
         }
         activeRecorder = null;
-      }
-
-      if (current.debate?.turns.length) {
-        const waiting: TrainingSession = {
-          ...current,
-          status: "debating",
-          liveTranscript: [],
-          debate: {
-            ...current.debate,
-            currentRound: Math.max(1, current.debate.currentRound - 1),
-          },
-        };
-        await api.updateSession(waiting);
-        revokeLastWavUrl(get().lastWavUrl);
-        set({
-          current: waiting,
-          error: null,
-          analyzeNote: "已放弃本轮回应",
-          level: 0,
-          liveSegments: [],
-          partialText: "",
-          pasteText: "",
-          lastWavUrl: null,
-          lastAudioPath: null,
-          asrStatus: null,
-        });
-        return;
       }
 
       await api.deleteSession(current.id);
@@ -1580,16 +1545,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const text = get().pasteText.trim();
       if (!text) throw new Error("请先粘贴逐字稿");
+      const pendingRetry = get().current;
+      const shouldResumeRetry =
+        pendingRetry?.status === "created" && Boolean(pendingRetry.parentSessionId);
       const input: CreateSessionInput = {
         mode: normalizePracticeMode(get().draftMode),
         topic: get().draftTopic,
         goal: get().draftGoal,
       };
-      const session = await withTimeout(
-        api.createSession(input),
-        5_000,
-        "创建 session",
-      );
+      const session = shouldResumeRetry
+        ? pendingRetry
+        : await withTimeout(api.createSession(input), 5_000, "创建 session");
       await api.injectPasteTranscript(session.id, text);
       let stopped = await api.stopRecording(session.id, {
         finalTranscript: text,
@@ -1597,18 +1563,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       });
       pastedSession = stopped;
       set({ current: stopped });
-      if (isInteractiveMode(input.mode)) {
-        const questionLabel = interactiveQuestionLabel(input.mode);
+      if (isInteractiveMode(session.mode)) {
+        const questionLabel = interactiveQuestionLabel(session.mode);
         const debate: DebateState = {
-          ...initialDebateState(
-            input.mode,
-            input.mode === "feynman"
-              ? {
-                  learnerRole: get().feynmanLearnerRole,
-                  difficulty: get().feynmanDifficulty,
-                }
-              : undefined,
-          ),
+          ...(session.debate ??
+            initialDebateState(
+              session.mode,
+              session.mode === "feynman"
+                ? {
+                    learnerRole: get().feynmanLearnerRole,
+                    difficulty: get().feynmanDifficulty,
+                  }
+                : undefined,
+            )),
           phase: "cross_examination",
           turns: [
             {

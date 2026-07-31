@@ -71,6 +71,7 @@ type FeynmanWorkbenchProps = {
   onStartResponse: () => void;
   onSubmitText: () => void;
   onRetryQuestion: () => void;
+  onAbandon: () => void;
   onOpenReview: () => void;
 };
 
@@ -161,6 +162,7 @@ export function FeynmanWorkbench({
   onStartResponse,
   onSubmitText,
   onRetryQuestion,
+  onAbandon,
   onOpenReview,
 }: FeynmanWorkbenchProps) {
   const [inputMode, setInputMode] = useState<InputMode>("text");
@@ -180,6 +182,11 @@ export function FeynmanWorkbench({
   const checkpoints = visibleDebate?.feynman?.checkpoints ?? [];
   const activeRole = visibleDebate?.feynman?.learnerRole ?? learnerRole;
   const activeDifficulty = visibleDebate?.feynman?.difficulty ?? difficulty;
+  const canAbandon =
+    Boolean(session) &&
+    session?.status !== "reviewed" &&
+    session?.status !== "completed" &&
+    session?.status !== "failed";
 
   const checkpointById = useMemo(
     () => new Map(checkpoints.map((checkpoint) => [checkpoint.id, checkpoint])),
@@ -492,6 +499,12 @@ export function FeynmanWorkbench({
               {!pendingQuestion && !recording && hasStarted && !showingCompleted && (
                 <Button variant="secondary" disabled={analyzing} onClick={onRetryQuestion}>
                   <RefreshCw /> 重新生成小白提问
+                </Button>
+              )}
+
+              {canAbandon && !recording && (
+                <Button variant="ghost" disabled={analyzing} onClick={onAbandon}>
+                  放弃本次练习
                 </Button>
               )}
 

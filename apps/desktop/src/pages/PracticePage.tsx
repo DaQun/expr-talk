@@ -114,6 +114,11 @@ export function PracticePage() {
   const interactiveMode = debateMode || feynmanMode;
   const debateWaiting = interactiveMode && current?.status === "debating";
   const sessionActive = recording || debateWaiting;
+  const canAbandon =
+    Boolean(current) &&
+    current?.status !== "reviewed" &&
+    current?.status !== "completed" &&
+    current?.status !== "failed";
   const tauri = audioApi.isTauri();
   const levelPct = Math.min(100, Math.round(level * 400));
   const startDisabled = sessionActive || analyzing;
@@ -396,9 +401,9 @@ export function PracticePage() {
                 variant="ghost"
                 disabled={analyzing}
                 onClick={() => setConfirmDiscard(true)}
-                title="停止麦克风并丢弃本轮，不进入分析"
+                title="停止麦克风并放弃本次练习，不进入分析"
               >
-                放弃录音
+                放弃本次练习
               </Button>
             </>
           )}
@@ -426,13 +431,13 @@ export function PracticePage() {
             className="bg-card w-full max-w-sm rounded-xl border border-border p-5 shadow-2xl"
           >
             <h2 id="discard-title" className="m-0 text-lg font-semibold">
-              放弃本轮录音？
+              放弃本次练习？
             </h2>
             <p
               id="discard-description"
               className="text-muted-foreground mt-2 mb-0 text-sm leading-relaxed"
             >
-              当前录音和字幕会被丢弃，不会生成复盘报告。题目仍会保留。
+              本次未完成的讲解、提问、录音和字幕都会被丢弃，不会生成复盘报告。题目仍会保留。
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <Button
@@ -441,7 +446,7 @@ export function PracticePage() {
                 autoFocus
                 onClick={() => setConfirmDiscard(false)}
               >
-                继续录音
+                继续练习
               </Button>
               <Button
                 variant="destructive"
@@ -503,6 +508,7 @@ export function PracticePage() {
         onStartResponse={() => void startDebateResponse()}
         onSubmitText={() => void handlePasteSubmit()}
         onRetryQuestion={() => void requestDebateQuestion()}
+        onAbandon={() => setConfirmDiscard(true)}
         onOpenReview={() => {
           const id = useSessionStore.getState().current?.id;
           if (id) navigate(`/review/${id}`);
@@ -748,6 +754,15 @@ export function PracticePage() {
               <Button variant="ghost" onClick={() => setPasteOpen((v) => !v)}>
                 {pasteOpen ? "收起粘贴稿" : "没有字幕？粘贴文本"}
               </Button>
+              {canAbandon && !recording && (
+                <Button
+                  variant="ghost"
+                  disabled={analyzing}
+                  onClick={() => setConfirmDiscard(true)}
+                >
+                  放弃本次练习
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>

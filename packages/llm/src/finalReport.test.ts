@@ -7,7 +7,7 @@ import {
   setOpenAICompatibleStreamTransport,
 } from "./openai_compatible";
 import { parseDebateTurnResult } from "./debate";
-import { parseFeynmanTurnResult } from "./feynman";
+import { generateFeynmanTurn, parseFeynmanTurnResult } from "./feynman";
 
 const baseReport = {
   schemaVersion: 4,
@@ -152,6 +152,51 @@ test("rejects a Feynman continuation without a learner question", () => {
     () => parseFeynmanTurnResult('{"understood":false,"focus":"机制"}'),
     /没有提出问题/,
   );
+});
+
+test("retries for a follow-up when the first Feynman explanation completes early", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content:
+                calls === 1
+                  ? '{"understood":true,"question":"","focus":"已理解"}'
+                  : '{"understood":false,"question":"复利的累积是怎样发生的？","focus":"累积机制"}',
+            },
+          },
+        ],
+      }),
+      { headers: { "Content-Type": "application/json" } },
+    );
+  };
+
+  try {
+    const result = await generateFeynmanTurn(
+      { kind: "feynman", phase: "opening", currentRound: 1, turns: [] },
+      "复利",
+      { providerId: "custom", baseUrl: "https://example.test/v1", apiKey: "test" },
+    );
+    assert.deepEqual(result, {
+      understood: false,
+      question: "复利的累积是怎样发生的？",
+      focus: "累积机制",
+      checkpoints: [
+        { id: "definition", status: "not_started" },
+        { id: "mechanism", status: "not_started" },
+        { id: "example", status: "not_started" },
+        { id: "boundary", status: "not_started" },
+      ],
+    });
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("uses an injected native transport instead of fetch", async () => {

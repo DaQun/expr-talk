@@ -112,7 +112,7 @@ export function RetryPage() {
                   })();
                 }}
               >
-                开始复练录音
+                进入复练
               </Button>
               <Button variant="ghost" asChild>
                 <Link to={`/review/${current.id}`}>返回复盘</Link>

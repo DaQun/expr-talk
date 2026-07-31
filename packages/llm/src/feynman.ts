@@ -36,6 +36,19 @@ const SYSTEM = `你是一个好奇、诚实的中文初学者。用户正用费�
 {"understood": boolean, "question": string, "focus": string, "checkpoints": [{"id":"definition"|"mechanism"|"example"|"boundary","status":"not_started"|"in_progress"|"understood","evidence":string}]}
 规则：understood 为 false 时 question 必须非空且最多两句、80 字；understood 为 true 时 question 必须为空，focus 用一句话概括你已经理解到的内容。四个 checkpoints 必须全部输出，evidence 只写用户已讲清的内容或当前缺口，不要虚构。`;
 
+function needsInitialFollowup(state: DebateState): boolean {
+  return !state.turns.some(
+    (turn) =>
+      turn.role === "opponent" && !turn.text.startsWith("我已经理解"),
+  );
+}
+
+function systemPrompt(requireFollowup: boolean): string {
+  if (!requireFollowup) return SYSTEM;
+  return `${SYSTEM}
+这是第一次评估用户的讲解。你必须先提出一个具体追问来检验理解；本次必须返回 understood=false，不能确认已经理解。`;
+}
+
 export async function generateFeynmanTurn(
   state: DebateState,
   topic: string,
@@ -44,38 +57,55 @@ export async function generateFeynmanTurn(
 ): Promise<FeynmanTurnResult> {
   const learnerRole = state.feynman?.learnerRole ?? "outsider";
   const difficulty = state.feynman?.difficulty ?? "standard";
-  const raw = await chatCompletion(
-    config,
-    [
-      { role: "system", content: SYSTEM },
-      {
-        role: "user",
-        content: JSON.stringify({
-          concept: topic,
-          currentRound: state.currentRound,
-          learnerRole,
-          learnerInstructions: ROLE_GUIDANCE[learnerRole],
-          difficulty,
-          difficultyInstructions: DIFFICULTY_GUIDANCE[difficulty],
-          currentCheckpoints: state.feynman?.checkpoints ?? [],
-          explanations: state.turns.map(({ role, round, text }) => ({
-            speaker: role === "user" ? "teacher" : "learner",
-            round,
-            text,
-          })),
-        }),
-      },
-    ],
+  const requireFollowup = needsInitialFollowup(state);
+  const messages = [
+    { role: "system" as const, content: systemPrompt(requireFollowup) },
     {
-      responseFormatJson: true,
-      temperature: 0.3,
-      signal: options?.signal,
-      stream: true,
-      onProgress: options?.onProgress,
+      role: "user" as const,
+      content: JSON.stringify({
+        concept: topic,
+        currentRound: state.currentRound,
+        learnerRole,
+        learnerInstructions: ROLE_GUIDANCE[learnerRole],
+        difficulty,
+        difficultyInstructions: DIFFICULTY_GUIDANCE[difficulty],
+        currentCheckpoints: state.feynman?.checkpoints ?? [],
+        explanations: state.turns.map(({ role, round, text }) => ({
+          speaker: role === "user" ? "teacher" : "learner",
+          round,
+          text,
+        })),
+      }),
     },
-  );
+  ];
+  const requestOptions = {
+    responseFormatJson: true,
+    temperature: 0.3,
+    signal: options?.signal,
+    stream: true,
+    onProgress: options?.onProgress,
+  };
+  const raw = await chatCompletion(config, messages, requestOptions);
 
-  return parseFeynmanTurnResult(raw);
+  let result = parseFeynmanTurnResult(raw);
+  if (requireFollowup && result.understood) {
+    const retryRaw = await chatCompletion(
+      config,
+      [
+        {
+          role: "system",
+          content: `${systemPrompt(true)}\n你刚刚过早确认了理解。现在只返回一个具体追问。`,
+        },
+        messages[1],
+      ],
+      requestOptions,
+    );
+    result = parseFeynmanTurnResult(retryRaw);
+    if (result.understood) {
+      throw new Error("首轮讲解必须先由小白提出一个追问");
+    }
+  }
+  return result;
 }
 
 export function parseFeynmanTurnResult(raw: string): FeynmanTurnResult {
