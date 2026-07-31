@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
-  ChevronLeft,
-  ChevronRight,
   Home,
   Mic,
   History,
+  PanelLeftClose,
+  PanelLeftOpen,
   UserRound,
   Settings,
 } from "lucide-react";
@@ -61,40 +61,45 @@ export function Layout() {
       >
         <div
           className={cn(
-            "flex w-full items-center gap-3 px-1 py-0.5",
-            sidebarCollapsed && "md:justify-center md:px-0",
+            "flex w-full items-center justify-between gap-3 px-1 py-0.5",
+            sidebarCollapsed && "md:flex-col md:justify-center md:gap-2 md:px-0",
           )}
         >
           <div
-            className="from-primary via-primary to-primary/80 text-primary-foreground grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-sm font-bold shadow-[0_4px_14px_oklch(0.72_0.11_82_/_30%)]"
-            aria-hidden
+            className={cn(
+              "flex min-w-0 items-center gap-3",
+              sidebarCollapsed && "md:justify-center",
+            )}
           >
-            E
-          </div>
-          <div className={cn("min-w-0", sidebarCollapsed && "md:hidden")}>
-            <div className="text-[0.95rem] font-semibold tracking-tight">
-              ExprTalk
+            <div
+              className="from-primary via-primary to-primary/80 text-primary-foreground grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-sm font-bold shadow-[0_4px_14px_oklch(0.72_0.11_82_/_30%)]"
+              aria-hidden
+            >
+              E
             </div>
-            <div className="text-muted-foreground text-[0.7rem] tracking-wide">
-              本地优先 · 表达训练
+            <div className={cn("min-w-0", sidebarCollapsed && "md:hidden")}>
+              <div className="text-[0.95rem] font-semibold tracking-tight">
+                ExprTalk
+              </div>
+              <div className="text-muted-foreground text-[0.7rem] tracking-wide">
+                本地优先 · 表达训练
+              </div>
             </div>
           </div>
-        </div>
-
-        <div className="flex w-full items-center gap-2">
-          <Separator className="bg-sidebar-border/80" />
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="hidden size-8 shrink-0 md:inline-flex"
+            className="hidden size-8 shrink-0 rounded-md md:inline-flex"
             aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
             title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
             onClick={toggleSidebar}
           >
-            {sidebarCollapsed ? <ChevronRight /> : <ChevronLeft />}
+            {sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
           </Button>
         </div>
+
+        <Separator className="bg-sidebar-border/80" />
 
         <nav
           className={cn(

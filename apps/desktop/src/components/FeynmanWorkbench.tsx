@@ -161,6 +161,7 @@ export function FeynmanWorkbench({
 }: FeynmanWorkbenchProps) {
   const [inputMode, setInputMode] = useState<InputMode>("text");
   const [newSessionFrom, setNewSessionFrom] = useState<string | null>(null);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const conversationRef = useRef<HTMLDivElement>(null);
   const session = current?.mode === "feynman" ? current : null;
   const debate = session?.debate;
@@ -184,7 +185,7 @@ export function FeynmanWorkbench({
   useEffect(() => {
     if (!conversationRef.current) return;
     conversationRef.current.scrollTop = conversationRef.current.scrollHeight;
-  }, [visibleDebate?.turns.length, pendingQuestion]);
+  }, [visibleDebate?.turns.length, pendingQuestion, historyExpanded]);
 
   const showVoiceRecorder = recording || (!hasStarted && inputMode === "voice");
   const canSubmitText =
@@ -201,6 +202,7 @@ export function FeynmanWorkbench({
           index === turns.length - 1
         ),
     ) ?? [];
+  const latestConversationTurn = conversationTurns[conversationTurns.length - 1];
 
   return (
     <div className="feynman-workbench flex flex-col gap-4">
@@ -337,28 +339,48 @@ export function FeynmanWorkbench({
             </CardHeader>
             <CardContent className="flex min-h-[22rem] flex-col gap-3 pt-4">
               {conversationTurns.length ? (
-                <div
-                  ref={conversationRef}
-                  className="max-h-[10rem] space-y-3 overflow-y-auto pr-1"
-                >
-                  {conversationTurns.map((turn) => (
-                    <div
-                      key={turn.id}
-                      className={cn(
-                        "max-w-[92%] rounded-lg border px-3.5 py-3 text-sm leading-relaxed",
-                        turn.role === "user"
-                          ? "border-primary/25 bg-primary/8 ml-auto"
-                          : "border-warning/30 bg-warning/8 mr-auto",
-                      )}
+                <div className="border-border bg-muted/20 rounded-lg border px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground text-xs">
+                      {historyExpanded ? "此前对话" : "上一条对话"}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setHistoryExpanded((expanded) => !expanded)}
                     >
-                      <div className="text-muted-foreground mb-1 flex items-center gap-1.5 text-xs">
-                        {turn.role === "user" ? <BrainCircuit className="size-3.5" /> : <MessageCircleQuestion className="size-3.5" />}
-                        {turn.role === "user" ? "我的讲解" : turn.text.startsWith("我已经理解") ? "小白确认" : "小白提问"}
-                        <span>第 {turn.round} 轮</span>
-                      </div>
-                      {turn.text}
+                      {historyExpanded ? "收起记录" : `查看 ${conversationTurns.length} 条记录`}
+                    </Button>
+                  </div>
+                  {historyExpanded ? (
+                    <div
+                      ref={conversationRef}
+                      className="mt-2 max-h-[13rem] space-y-2 overflow-y-auto pr-1"
+                    >
+                      {conversationTurns.map((turn) => (
+                        <div
+                          key={turn.id}
+                          className={cn(
+                            "rounded-md border px-3 py-2 text-sm leading-relaxed",
+                            turn.role === "user"
+                              ? "border-primary/20 bg-primary/7"
+                              : "border-warning/25 bg-warning/8",
+                          )}
+                        >
+                          <div className="text-muted-foreground mb-1 flex items-center gap-1.5 text-xs">
+                            {turn.role === "user" ? <BrainCircuit className="size-3.5" /> : <MessageCircleQuestion className="size-3.5" />}
+                            {turn.role === "user" ? "我的讲解" : "小白提问"} · 第 {turn.round} 轮
+                          </div>
+                          {turn.text}
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : (
+                    <p className="text-muted-foreground mt-1.5 mb-0 line-clamp-2 text-sm leading-relaxed">
+                      {latestConversationTurn?.text}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="text-muted-foreground flex min-h-24 flex-1 items-center justify-center text-center text-sm leading-relaxed">
