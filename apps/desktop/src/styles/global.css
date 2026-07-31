@@ -148,6 +148,12 @@
 }
 
 @layer utilities {
+  @media (min-width: 1024px) {
+    main:has(.feynman-workbench) {
+      max-width: none;
+    }
+  }
+
   .surface-elevated {
     background:
       linear-gradient(

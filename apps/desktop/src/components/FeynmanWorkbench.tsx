@@ -203,7 +203,7 @@ export function FeynmanWorkbench({
     ) ?? [];
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="feynman-workbench flex flex-col gap-4">
       <PageHeader
         title="费曼学习"
         description="把概念讲给小白听。小白只会根据你的讲解追问，直到能够自己复述。"
@@ -216,8 +216,8 @@ export function FeynmanWorkbench({
 
       {guidance}
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_19rem]">
-        <div className="flex min-w-0 flex-col gap-4">
+      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_15.5rem]">
+        <div className="flex min-w-0 flex-col gap-3">
           {!hasStarted && (
             <Card>
               <CardHeader>
@@ -324,7 +324,7 @@ export function FeynmanWorkbench({
             </Card>
           )}
 
-          <Card className="min-h-[32rem]">
+          <Card className="min-h-0">
             <CardHeader className="border-border border-b pb-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle className="text-base">讲解对话</CardTitle>
@@ -335,9 +335,12 @@ export function FeynmanWorkbench({
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="flex min-h-[25rem] flex-col gap-4 pt-4">
+            <CardContent className="flex min-h-[22rem] flex-col gap-3 pt-4">
               {conversationTurns.length ? (
-                <div ref={conversationRef} className="max-h-[22rem] space-y-3 overflow-y-auto pr-1">
+                <div
+                  ref={conversationRef}
+                  className="max-h-[10rem] space-y-3 overflow-y-auto pr-1"
+                >
                   {conversationTurns.map((turn) => (
                     <div
                       key={turn.id}
@@ -358,7 +361,7 @@ export function FeynmanWorkbench({
                   ))}
                 </div>
               ) : (
-                <div className="text-muted-foreground flex min-h-32 flex-1 items-center justify-center text-center text-sm leading-relaxed">
+                <div className="text-muted-foreground flex min-h-24 flex-1 items-center justify-center text-center text-sm leading-relaxed">
                   选择一个概念，用自己的话从定义开始讲。
                 </div>
               )}
@@ -373,7 +376,7 @@ export function FeynmanWorkbench({
               )}
 
               {!showingCompleted && (
-                <div className="border-border bg-muted/25 mt-auto rounded-lg border p-3.5">
+                <div className="border-border bg-muted/25 mt-auto rounded-lg border p-3">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <Label className="text-foreground">{inputMode === "text" ? "用文字讲解" : "用语音讲解"}</Label>
                     <div className="bg-background flex items-center gap-1 rounded-lg border border-border p-1" role="group" aria-label="讲解输入方式">
@@ -452,7 +455,7 @@ export function FeynmanWorkbench({
           </Card>
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-4 xl:sticky xl:top-4">
+        <aside className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-6">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">理解检查点</CardTitle>
