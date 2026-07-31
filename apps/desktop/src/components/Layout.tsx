@@ -1,6 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
+  ChevronLeft,
+  ChevronRight,
   Home,
   Mic,
   History,
@@ -8,6 +10,7 @@ import {
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useSessionStore } from "@/state/sessionStore";
 
@@ -21,6 +24,17 @@ const links = [
 
 export function Layout() {
   const recording = useSessionStore((s) => s.current?.status === "recording");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => window.localStorage.getItem("expr-talk:sidebar-collapsed") === "true",
+  );
+
+  function toggleSidebar() {
+    setSidebarCollapsed((collapsed) => {
+      const next = !collapsed;
+      window.localStorage.setItem("expr-talk:sidebar-collapsed", String(next));
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!recording) return;
@@ -33,16 +47,31 @@ export function Layout() {
   }, [recording]);
 
   return (
-    <div className="grid min-h-screen md:grid-cols-[232px_minmax(0,1fr)]">
-      <aside className="border-sidebar-border bg-sidebar/90 text-sidebar-foreground sticky top-0 z-10 flex h-auto flex-col gap-5 border-b p-4 backdrop-blur-xl md:h-screen md:border-r md:border-b-0 md:p-5">
-        <div className="flex items-center gap-3 px-1 py-0.5">
+    <div
+      className={cn(
+        "grid min-h-screen transition-[grid-template-columns] duration-200 md:grid-cols-[232px_minmax(0,1fr)]",
+        sidebarCollapsed && "md:grid-cols-[72px_minmax(0,1fr)]",
+      )}
+    >
+      <aside
+        className={cn(
+          "border-sidebar-border bg-sidebar/90 text-sidebar-foreground sticky top-0 z-10 flex h-auto flex-col gap-5 border-b p-4 backdrop-blur-xl md:h-screen md:border-r md:border-b-0 md:p-5",
+          sidebarCollapsed && "md:items-center md:px-3",
+        )}
+      >
+        <div
+          className={cn(
+            "flex w-full items-center gap-3 px-1 py-0.5",
+            sidebarCollapsed && "md:justify-center md:px-0",
+          )}
+        >
           <div
             className="from-primary via-primary to-primary/80 text-primary-foreground grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-sm font-bold shadow-[0_4px_14px_oklch(0.72_0.11_82_/_30%)]"
             aria-hidden
           >
             E
           </div>
-          <div className="min-w-0">
+          <div className={cn("min-w-0", sidebarCollapsed && "md:hidden")}>
             <div className="text-[0.95rem] font-semibold tracking-tight">
               ExprTalk
             </div>
@@ -52,18 +81,41 @@ export function Layout() {
           </div>
         </div>
 
-        <Separator className="bg-sidebar-border/80" />
+        <div className="flex w-full items-center gap-2">
+          <Separator className="bg-sidebar-border/80" />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="hidden size-8 shrink-0 md:inline-flex"
+            aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+            title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+            onClick={toggleSidebar}
+          >
+            {sidebarCollapsed ? <ChevronRight /> : <ChevronLeft />}
+          </Button>
+        </div>
 
         <nav
-          className="flex flex-1 flex-row flex-wrap gap-1 md:flex-col"
+          className={cn(
+            "flex w-full flex-1 flex-row flex-wrap gap-1 md:flex-col",
+            sidebarCollapsed && "md:items-center",
+          )}
           aria-label="主导航"
         >
           {recording && (
             <NavLink
               to="/practice"
-              className="border-warning/30 bg-warning/10 text-warning rounded-lg border px-3 py-2 text-xs leading-relaxed"
+              className={cn(
+                "border-warning/30 bg-warning/10 text-warning rounded-lg border px-3 py-2 text-xs leading-relaxed",
+                sidebarCollapsed && "md:size-10 md:p-0 md:text-[0px]",
+              )}
+              title="录音正在进行，请回到练习页停止或放弃后再切换页面。"
             >
-              录音正在进行。请回到练习页停止或放弃后再切换页面。
+              <Mic className={cn("hidden size-4", sidebarCollapsed && "md:block")} />
+              <span className={cn(sidebarCollapsed && "md:hidden")}>
+                录音正在进行。请回到练习页停止或放弃后再切换页面。
+              </span>
             </NavLink>
           )}
           {links.map((link) => {
@@ -75,13 +127,16 @@ export function Layout() {
                 to={link.to}
                 end={"end" in link ? link.end : false}
                 aria-disabled={blocked}
+                aria-label={sidebarCollapsed ? link.label : undefined}
                 tabIndex={blocked ? -1 : undefined}
+                title={sidebarCollapsed ? link.label : undefined}
                 onClick={(event) => {
                   if (blocked) event.preventDefault();
                 }}
                 className={({ isActive }) =>
                   cn(
                     "text-muted-foreground group relative flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-all duration-200",
+                    sidebarCollapsed && "md:size-10 md:justify-center md:px-0",
                     "hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground",
                     isActive &&
                       "bg-sidebar-accent text-sidebar-accent-foreground font-medium shadow-[inset_0_0_0_1px_oklch(0.72_0.11_82_/_22%)]",
@@ -104,7 +159,9 @@ export function Layout() {
                       )}
                       aria-hidden
                     />
-                    {link.label}
+                    <span className={cn(sidebarCollapsed && "md:hidden")}>
+                      {link.label}
+                    </span>
                   </>
                 )}
               </NavLink>
@@ -112,7 +169,12 @@ export function Layout() {
           })}
         </nav>
 
-        <div className="text-muted-foreground mt-auto hidden rounded-xl border border-sidebar-border/70 bg-sidebar-accent/30 p-3.5 text-[0.7rem] leading-relaxed md:block">
+        <div
+          className={cn(
+            "text-muted-foreground mt-auto hidden rounded-xl border border-sidebar-border/70 bg-sidebar-accent/30 p-3.5 text-[0.7rem] leading-relaxed md:block",
+            sidebarCollapsed && "md:hidden",
+          )}
+        >
           <div className="text-foreground/80 mb-1 font-medium tracking-wide">
             训练原则
           </div>
