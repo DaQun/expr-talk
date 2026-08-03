@@ -170,6 +170,16 @@ export function ProfilePage() {
         <MetricBadge label="近 30 天活跃" value={`${data.activeDays30} 天`} />
       </div>
 
+      {(data.attemptCount > data.sessionCount || data.interruptedSessionCount > 0) && (
+        <p className="text-muted-foreground mt-3 mb-0 text-xs">
+          共开始 {data.attemptCount} 次，完成 {data.sessionCount} 次
+          {data.interruptedSessionCount > 0
+            ? `，其中 ${data.interruptedSessionCount} 次中断或失败未计入成长指标`
+            : ""}
+          。
+        </p>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <Card>
           <CardHeader>

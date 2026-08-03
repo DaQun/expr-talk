@@ -34,6 +34,9 @@ export type UserProfile = {
   generatedAt: string;
   maturity: ProfileMaturity;
   sessionCount: number;
+  /** 所有已创建尝试，包含失败和中断。 */
+  attemptCount: number;
+  interruptedSessionCount: number;
   reviewedSessionCount: number;
   retryCount: number;
   retrySuccessRate?: number;

@@ -90,6 +90,12 @@ export type StopRecordingOptions = {
   liveTranscript?: TranscriptSegment[];
 };
 
+export type HistoryStorageStats = {
+  sessionCount: number;
+  audioCount: number;
+  audioBytes: number;
+};
+
 export const api = {
   isTauri,
 
@@ -494,16 +500,58 @@ export const api = {
   async deleteSession(id: string): Promise<void> {
     if (isTauri()) {
       await withTimeout(
-        invoke("audio_discard", { sessionId: id }),
-        5_000,
-        "删除练习录音",
-      );
-      await withTimeout(
-        invoke("session_delete", { id }),
-        5_000,
-        "删除练习记录",
+        invoke("session_delete_complete", { id }),
+        15_000,
+        "删除练习记录和录音",
       );
     }
     await memorySessions.delete(id);
+    const cached = await memorySessions.list({ limit: 10_000 });
+    await Promise.all(
+      cached
+        .filter((session) => session.parentSessionId === id)
+        .map((session) =>
+          memorySessions.update({
+            ...session,
+            parentSessionId: undefined,
+            comparison: session.comparison
+              ? { ...session.comparison, parentAvailable: false }
+              : undefined,
+          }),
+        ),
+    );
+  },
+
+  async deleteAllSessions(): Promise<void> {
+    if (isTauri()) {
+      await withTimeout(
+        invoke("session_delete_complete", { id: null }),
+        30_000,
+        "清空练习记录和录音",
+      );
+    }
+    const sessions = await memorySessions.list({ limit: 10_000 });
+    await Promise.all(sessions.map((session) => memorySessions.delete(session.id)));
+  },
+
+  async historyStorageStats(): Promise<HistoryStorageStats> {
+    if (!isTauri()) {
+      const sessions = await memorySessions.list({ limit: 10_000 });
+      return { sessionCount: sessions.length, audioCount: 0, audioBytes: 0 };
+    }
+    return withTimeout(
+      invoke<HistoryStorageStats>("history_storage_stats"),
+      5_000,
+      "读取存储占用",
+    );
+  },
+
+  async exportHistory(): Promise<string> {
+    if (!isTauri()) throw new Error("完整备份仅桌面端可用");
+    return withTimeout(
+      invoke<string>("history_export"),
+      120_000,
+      "导出练习备份",
+    );
   },
 };

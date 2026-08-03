@@ -61,7 +61,7 @@ export function HomePage() {
                 <span className="text-gradient-gold">变成可改进的闭环</span>
               </h1>
               <p className="text-muted-foreground max-w-lg text-[0.98rem] leading-relaxed">
-                录音、转写、诊断、复练对比。默认留在本机；需要时再接入在线模型增强报告。
+                录音与转写默认留在本机；开始练习前配置大模型，用于生成结构化诊断与复练建议。
               </p>
             </div>
             <div className="flex flex-wrap gap-2.5">
@@ -147,12 +147,6 @@ export function HomePage() {
             ))}
           </div>
         </div>
-        <Button asChild className="mt-auto w-full">
-          <Link to="/practice">
-            使用所选模式
-            <ArrowRight className="size-4" />
-          </Link>
-        </Button>
       </section>
     </div>
   );

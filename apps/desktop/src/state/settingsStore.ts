@@ -12,6 +12,7 @@ type SettingsState = {
   saveError: string | null;
   load: () => Promise<void>;
   save: (settings?: AppSettings) => Promise<void>;
+  flush: () => Promise<void>;
   /** 改内存并防抖自动写入 SQLite */
   patch: (partial: Partial<AppSettings>) => void;
 };
@@ -87,6 +88,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ saving: false, saveError: msg });
       throw e;
     }
+  },
+
+  flush: async () => {
+    if (saveTimer != null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    await get().save(get().settings);
   },
 
   patch: (partial) => {

@@ -44,3 +44,37 @@ pub fn create_wav_file(path: &Path, sample_rate: u32) -> std::io::Result<File> {
     write_wav_header(&mut file, sample_rate, 0)?;
     Ok(file)
 }
+
+/// 强退时 finish 未执行，按文件实际长度修复 PCM WAV 头。
+pub fn repair_wav_file(path: &Path) -> std::io::Result<bool> {
+    let mut file = std::fs::OpenOptions::new().read(true).write(true).open(path)?;
+    let len = file.metadata()?.len();
+    if len <= 44 {
+        return Ok(false);
+    }
+    let data_size = u32::try_from(len - 44).unwrap_or(u32::MAX);
+    patch_wav_sizes(&mut file, data_size)?;
+    file.flush()?;
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{create_wav_file, repair_wav_file};
+    use std::io::{Read, Write};
+
+    #[test]
+    fn repairs_sizes_after_an_interrupted_write() {
+        let path = std::env::temp_dir().join(format!("expr-talk-wav-{}.wav", uuid::Uuid::new_v4()));
+        {
+            let mut file = create_wav_file(&path, 16_000).unwrap();
+            file.write_all(&[0u8; 320]).unwrap();
+        }
+        assert!(repair_wav_file(&path).unwrap());
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path).unwrap().read_to_end(&mut bytes).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 356);
+        assert_eq!(u32::from_le_bytes(bytes[40..44].try_into().unwrap()), 320);
+        std::fs::remove_file(path).unwrap();
+    }
+}

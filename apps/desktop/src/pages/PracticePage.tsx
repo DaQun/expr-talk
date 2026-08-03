@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   categoriesForMode,
   DEFAULT_MODE_RUBRICS,
@@ -41,9 +41,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
+import { Keyboard, Mic } from "lucide-react";
 import { useElapsedSeconds } from "@/hooks/useElapsedSeconds";
 import { FeynmanWorkbench } from "@/components/FeynmanWorkbench";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useSettingsStore } from "@/state/settingsStore";
+import { resolveLlmConfig } from "@/services/llmReadiness";
+
+type InputMode = "text" | "voice";
 
 export function PracticePage() {
   const navigate = useNavigate();
@@ -81,6 +88,8 @@ export function PracticePage() {
     refreshModelStatus,
     loadSession,
   } = useSessionStore();
+  const settings = useSettingsStore((state) => state.settings);
+  const settingsLoaded = useSettingsStore((state) => state.loaded);
 
   const draftMode = normalizePracticeMode(rawDraftMode);
 
@@ -106,6 +115,7 @@ export function PracticePage() {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [topicCategory, setTopicCategory] = useState("全部");
   const [topicId, setTopicId] = useState<string | null>(null);
+  const [inputMode, setInputMode] = useState<InputMode>("text");
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const transcriptAutoFollowRef = useRef(true);
   const recording = current?.status === "recording";
@@ -114,6 +124,8 @@ export function PracticePage() {
   const interactiveMode = debateMode || feynmanMode;
   const debateWaiting = interactiveMode && current?.status === "debating";
   const sessionActive = recording || debateWaiting;
+  /** 辩论会话一旦开始（录音/等待回应/分析中）即锁定输入方式，中途不能切换。 */
+  const inputLocked = sessionActive || analyzing;
   const canAbandon =
     Boolean(current) &&
     current?.status !== "reviewed" &&
@@ -121,8 +133,14 @@ export function PracticePage() {
     current?.status !== "failed";
   const tauri = audioApi.isTauri();
   const levelPct = Math.min(100, Math.round(level * 400));
-  const startDisabled = sessionActive || analyzing;
-  const finalSegs = liveSegments.filter((s) => s.isFinal && s.text.trim());
+  const llmReadiness = settingsLoaded
+    ? resolveLlmConfig(settings)
+    : ({ ok: false, reason: "正在检查大模型配置…" } as const);
+  const llmReady = llmReadiness.ok;
+  const startDisabled = sessionActive || analyzing || !llmReady;
+  const finalSegs = recording
+    ? liveSegments.filter((s) => s.isFinal && s.text.trim())
+    : [];
   const hasSubtitle = Boolean(finalSegs.length > 0 || partialText.trim());
   const analyzeElapsed = useElapsedSeconds(analyzing);
 
@@ -221,10 +239,11 @@ export function PracticePage() {
   }, [confirmDiscard, analyzing]);
 
   useEffect(() => {
-    if (recording && seconds >= 10 && !hasSubtitle) {
+    // 辩论模式文字输入已内联，不再自动弹出粘贴稿
+    if (!debateMode && recording && seconds >= 10 && !hasSubtitle) {
       setPasteOpen(true);
     }
-  }, [recording, seconds, hasSubtitle]);
+  }, [debateMode, recording, seconds, hasSubtitle]);
 
   const guidance = useMemo(
     () =>
@@ -332,7 +351,7 @@ export function PracticePage() {
           {debateWaiting ? (
             <>
               <Button
-                disabled={analyzing || !current?.debate?.pendingQuestion}
+                disabled={analyzing || !current?.debate?.pendingQuestion || !llmReady}
                 onClick={() => void startDebateResponse()}
               >
                 {feynmanMode ? "开始录音讲解" : "开始回应"}
@@ -340,7 +359,7 @@ export function PracticePage() {
               {debateMode && (
                 <Button
                   variant="secondary"
-                  disabled={analyzing}
+                  disabled={analyzing || !llmReady}
                   onClick={() => void finishDebateAndReview()}
                 >
                   结束并查看复盘
@@ -480,18 +499,34 @@ export function PracticePage() {
         recording={recording}
         waiting={debateWaiting}
         analyzing={analyzing}
+        analyzeNote={analyzeNote}
+        analyzeElapsed={analyzeElapsed}
         streamedQuestion={streamedQuestion}
         pasteText={pasteText}
         learnerRole={feynmanLearnerRole}
         difficulty={feynmanDifficulty}
         modelReady={modelStatus?.ready ?? null}
+        llmReady={llmReady}
         recorderPanel={recorderPanel}
         discardDialog={discardDialog}
         guidance={
-          <GuidancePanel
-            title={recording ? "录音中提示" : "开始前检查"}
-            items={guidance.filter((item) => item.id !== "ready")}
-          />
+          <div className="flex flex-col gap-3">
+            {!llmReady && (
+              <Alert variant="destructive">
+                <AlertTitle>开始练习前需要先完成大模型配置</AlertTitle>
+                <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+                  <span>{llmReadiness.reason}</span>
+                  <Button asChild size="sm" variant="outline">
+                    <Link to="/settings">前往设置</Link>
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            )}
+            <GuidancePanel
+              title={recording ? "录音中提示" : "开始前检查"}
+              items={guidance.filter((item) => item.id !== "ready")}
+            />
+          </div>
         }
         error={error}
         onModeChange={setDraftMode}
@@ -533,6 +568,17 @@ export function PracticePage() {
       />
 
       <div className="flex flex-col gap-3">
+        {!llmReady && (
+          <Alert variant="destructive">
+            <AlertTitle>开始练习前需要先完成大模型配置</AlertTitle>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>{llmReadiness.reason}</span>
+              <Button asChild size="sm" variant="outline">
+                <Link to="/settings">前往设置</Link>
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
         <GuidancePanel
           title={recording ? "录音中提示" : "开始前检查"}
           items={guidance.filter((g) => g.id !== "ready")}
@@ -563,6 +609,9 @@ export function PracticePage() {
                   ASR {modelStatus.ready ? "就绪" : "未就绪"}
                 </Badge>
               )}
+              <Badge variant={llmReady ? "success" : "warning"}>
+                LLM {llmReady ? "已配置" : "未就绪"}
+              </Badge>
             </div>
 
             <div className="bg-muted/50 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-lg border border-border px-3.5 py-2.5">
@@ -609,7 +658,7 @@ export function PracticePage() {
               </div>
             )}
 
-            {debateWaiting && current?.debate?.pendingQuestion && (
+            {current?.debate?.pendingQuestion && (
               <div className="border-warning/50 bg-warning/10 rounded-lg border px-3.5 py-3">
                 <div className="text-warning-foreground mb-1 text-xs font-medium">
                   反方质询
@@ -749,26 +798,116 @@ export function PracticePage() {
               </div>
             </div>
 
-            {recorderPanel}
+            {debateMode ? (
+              <div className="border-border bg-muted/30 rounded-lg border p-3.5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <Label className="text-foreground">
+                    {inputMode === "text" ? "用文字回应" : "用语音回应"}
+                  </Label>
+                  <ToggleGroup
+                    type="single"
+                    value={inputMode}
+                    onValueChange={(value) => {
+                      if (value) setInputMode(value as InputMode);
+                    }}
+                    disabled={inputLocked}
+                    aria-label="辩论输入方式"
+                  >
+                    <ToggleGroupItem value="text" aria-label="文字输入">
+                      <Keyboard data-icon="inline-start" /> 文字
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="voice" aria-label="语音输入">
+                      <Mic data-icon="inline-start" /> 语音
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
 
-            <div className="flex flex-wrap gap-2.5">
-              <Button variant="ghost" onClick={() => setPasteOpen((v) => !v)}>
-                {pasteOpen ? "收起粘贴稿" : "没有字幕？粘贴文本"}
-              </Button>
-              {canAbandon && !recording && (
-                <Button
-                  variant="ghost"
-                  disabled={analyzing}
-                  onClick={() => setConfirmDiscard(true)}
-                >
-                  放弃本次练习
-                </Button>
-              )}
-            </div>
+                {inputMode === "text" ? (
+                  <>
+                    <Textarea
+                      value={pasteText}
+                      onChange={(event) => setPasteText(event.target.value)}
+                      placeholder={
+                        debateWaiting
+                          ? "直接回应反方刚才的质询…"
+                          : "先写下你的立论…"
+                      }
+                      disabled={analyzing || recording}
+                      rows={4}
+                      className="min-h-28"
+                    />
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        disabled={
+                          !pasteText.trim() || analyzing || !llmReady
+                        }
+                        onClick={() => void handlePasteSubmit()}
+                      >
+                        {debateWaiting
+                          ? `提交第 ${(current?.debate?.currentRound ?? 1) + 1} 轮文字回应`
+                          : "提交首轮文字立论"}
+                      </Button>
+                      {debateWaiting && (
+                        <Button
+                          variant="outline"
+                          disabled={analyzing || !llmReady}
+                          onClick={() => void finishDebateAndReview()}
+                        >
+                          结束并查看复盘
+                        </Button>
+                      )}
+                      {canAbandon && !recording && (
+                        <Button
+                          variant="ghost"
+                          disabled={analyzing}
+                          onClick={() => setConfirmDiscard(true)}
+                        >
+                          放弃本次练习
+                        </Button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {recorderPanel}
+                    {canAbandon && !recording && (
+                      <div className="mt-3">
+                        <Button
+                          variant="ghost"
+                          disabled={analyzing}
+                          onClick={() => setConfirmDiscard(true)}
+                        >
+                          放弃本次练习
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                {recorderPanel}
+
+                <div className="flex flex-wrap gap-2.5">
+                  <Button variant="ghost" onClick={() => setPasteOpen((v) => !v)}>
+                    {pasteOpen ? "收起粘贴稿" : "没有字幕？粘贴文本"}
+                  </Button>
+                  {canAbandon && !recording && (
+                    <Button
+                      variant="ghost"
+                      disabled={analyzing}
+                      onClick={() => setConfirmDiscard(true)}
+                    >
+                      放弃本次练习
+                    </Button>
+                  )}
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
-        {pasteOpen && (
+        {!debateMode && pasteOpen && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
@@ -794,7 +933,7 @@ export function PracticePage() {
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="secondary"
-                  disabled={analyzing || !pasteText.trim()}
+                  disabled={analyzing || !pasteText.trim() || !llmReady}
                   onClick={() => void handlePasteSubmit()}
                 >
                   {recording && interactiveMode
@@ -810,7 +949,7 @@ export function PracticePage() {
                 {debateWaiting && debateMode && (
                   <Button
                     variant="outline"
-                    disabled={analyzing}
+                    disabled={analyzing || !llmReady}
                     onClick={() => void finishDebateAndReview()}
                   >
                     结束并查看复盘

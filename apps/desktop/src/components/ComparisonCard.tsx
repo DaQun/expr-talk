@@ -195,9 +195,13 @@ export function ComparisonCard({ comparison }: Props) {
         )}
       </CardContent>
       <CardFooter>
-        <Button variant="ghost" size="sm" asChild>
-          <Link to={`/review/${comparison.parentSessionId}`}>查看上一轮</Link>
-        </Button>
+        {comparison.parentAvailable !== false ? (
+          <Button variant="ghost" size="sm" asChild>
+            <Link to={`/review/${comparison.parentSessionId}`}>查看上一轮</Link>
+          </Button>
+        ) : (
+          <span className="text-muted-foreground text-sm">上一轮已删除，对比快照仍保留</span>
+        )}
       </CardFooter>
     </Card>
   );

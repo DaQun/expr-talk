@@ -55,7 +55,7 @@ npm run typecheck
 - [x] Spike 1：麦克风 + AudioWorklet + 16k int16 + WAV（浏览器缓冲 / Tauri 落盘）
 - [x] Spike 2：本地流式 ASR（官方 sherpa-onnx OnlineRecognizer + Tauri event 字幕）
 - [x] SQLite 持久化（sessions / settings）
-- [x] 停止后自动规则报告 + 可选 LLM 结构化报告（失败降级）
+- [x] 开始前检查 LLM 配置，停止后生成结构化报告
 - [x] 复练对比（相对上一轮填充词/犹豫词/密度等 delta）
 
 ### 本地 ASR 模型

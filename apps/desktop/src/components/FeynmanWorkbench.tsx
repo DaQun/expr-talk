@@ -51,11 +51,14 @@ type FeynmanWorkbenchProps = {
   recording: boolean;
   waiting: boolean;
   analyzing: boolean;
+  analyzeNote: string | null;
+  analyzeElapsed: number;
   streamedQuestion: string | null;
   pasteText: string;
   learnerRole: FeynmanLearnerRole;
   difficulty: FeynmanDifficulty;
   modelReady: boolean | null;
+  llmReady: boolean;
   recorderPanel: ReactNode;
   discardDialog?: ReactNode;
   guidance: ReactNode;
@@ -143,11 +146,14 @@ export function FeynmanWorkbench({
   recording,
   waiting,
   analyzing,
+  analyzeNote,
+  analyzeElapsed,
   streamedQuestion,
   pasteText,
   learnerRole,
   difficulty,
   modelReady,
+  llmReady,
   recorderPanel,
   discardDialog,
   guidance,
@@ -207,6 +213,7 @@ export function FeynmanWorkbench({
   const showVoiceRecorder = recording || (!hasStarted && inputMode === "voice");
   const canSubmitText =
     Boolean(pasteText.trim()) &&
+    llmReady &&
     !analyzing &&
     (!hasStarted || Boolean(pendingQuestion));
   const userTurns = visibleDebate?.turns.filter((turn) => turn.role === "user") ?? [];
@@ -228,9 +235,14 @@ export function FeynmanWorkbench({
         description="把概念讲给小白听。小白只会根据你的讲解追问，直到能够自己复述。"
         className="feynman-page-header"
         action={
-          <Badge variant={modelReady === false ? "warning" : "success"}>
-            ASR {modelReady === false ? "未就绪" : "就绪"}
-          </Badge>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={modelReady === false ? "warning" : "success"}>
+              ASR {modelReady === false ? "未就绪" : "就绪"}
+            </Badge>
+            <Badge variant={llmReady ? "success" : "warning"}>
+              LLM {llmReady ? "已配置" : "未就绪"}
+            </Badge>
+          </div>
         }
       />
 
@@ -441,10 +453,18 @@ export function FeynmanWorkbench({
               {analyzing && !pendingQuestion && (
                 <div className="border-warning/35 bg-warning/10 rounded-lg border px-3.5 py-3" role="status">
                   <div className="text-warning-foreground mb-1 flex items-center gap-1.5 text-xs font-medium">
-                    <MessageCircleQuestion className="size-3.5" /> 小白正在组织问题
+                    {streamedQuestion ? (
+                      <>
+                        <MessageCircleQuestion className="size-3.5" /> 小白正在组织问题
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="size-3.5" /> {analyzeNote || "正在生成复盘…"}
+                      </>
+                    )}
                   </div>
                   <p className="m-0 text-sm leading-relaxed">
-                    {streamedQuestion || "正在根据你的讲解整理一个最关键的问题…"}
+                    {streamedQuestion || `已等待 ${analyzeElapsed} 秒…`}
                     <span className="ml-1 inline-block size-1.5 animate-pulse rounded-full bg-warning align-middle" aria-hidden />
                   </p>
                 </div>
@@ -460,7 +480,7 @@ export function FeynmanWorkbench({
                       onValueChange={(value) => {
                         if (value) setInputMode(value as InputMode);
                       }}
-                      disabled={recording}
+                      disabled={hasStarted}
                       aria-label="讲解输入方式"
                     >
                       <ToggleGroupItem value="text" aria-label="文字输入">
@@ -491,11 +511,11 @@ export function FeynmanWorkbench({
                   ) : showVoiceRecorder ? (
                     recorderPanel
                   ) : pendingQuestion ? (
-                    <Button disabled={analyzing} onClick={onStartResponse}>
+                    <Button disabled={analyzing || !llmReady} onClick={onStartResponse}>
                       <Mic /> 开始录音讲解
                     </Button>
                   ) : (
-                    <Button disabled={active} onClick={onStartVoice}>
+                    <Button disabled={active || !llmReady} onClick={onStartVoice}>
                       <Mic /> 开始录音讲解
                     </Button>
                   )}
@@ -503,7 +523,7 @@ export function FeynmanWorkbench({
               )}
 
               {!pendingQuestion && !recording && hasStarted && !showingCompleted && (
-                <Button variant="secondary" disabled={analyzing} onClick={onRetryQuestion}>
+                <Button variant="secondary" disabled={analyzing || !llmReady} onClick={onRetryQuestion}>
                   <RefreshCw /> 重新生成小白提问
                 </Button>
               )}
@@ -511,7 +531,7 @@ export function FeynmanWorkbench({
               {canAbandon && !recording && (
                 <div className="flex flex-wrap gap-2">
                   {canFinish && (
-                    <Button variant="outline" disabled={analyzing} onClick={onFinish}>
+                    <Button variant="outline" disabled={analyzing || !llmReady} onClick={onFinish}>
                       结束并查看复盘
                     </Button>
                   )}

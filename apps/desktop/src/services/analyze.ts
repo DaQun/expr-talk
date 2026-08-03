@@ -2,7 +2,6 @@ import {
   DEFAULT_MODE_RUBRICS,
   normalizePracticeMode,
   type AppSettings,
-  type LLMConfig,
   type SessionMetrics,
   type StructuredReport,
   type DebateState,
@@ -18,6 +17,8 @@ import {
   getLLMProvider,
   type LLMStreamProgress,
 } from "@expr-talk/llm";
+import { resolveLlmConfig } from "./llmReadiness";
+import { selectAnalysisText } from "./analysisText";
 
 export type AnalyzeResult = {
   metrics: SessionMetrics;
@@ -98,8 +99,6 @@ export class LlmReviewError extends Error {
 }
 
 const LLM_TIMEOUT_MS = 120_000;
-/** 指标与送模截断，避免超长文本卡主线程 */
-const MAX_CHARS_FOR_METRICS = 8_000;
 
 function yieldUi(): Promise<void> {
   return new Promise((r) => {
@@ -111,73 +110,19 @@ function yieldUi(): Promise<void> {
   });
 }
 
-export type LlmReady =
-  | { ok: true; config: LLMConfig }
-  | { ok: false; reason: string };
-
-/** 是否已具备可调用的大模型（与是否生成复盘报告一致） */
-export function resolveLlmConfig(settings: AppSettings): LlmReady {
-  const providerId = settings.llm.provider || "deepseek";
-  const providerCfg = settings.llm.providers[providerId] ?? {};
-  const apiKey = String(providerCfg.apiKey ?? "").trim();
-  const baseUrl = String(providerCfg.baseUrl ?? "").trim();
-  const model = String(providerCfg.model ?? "").trim();
-
-  const isLocal =
-    providerId === "ollama" ||
-    baseUrl.includes("localhost") ||
-    baseUrl.includes("127.0.0.1");
-
-  if (!isLocal && !apiKey) {
-    return {
-      ok: false,
-      reason: `未配置 ${providerId} 的 API Key，无法生成复盘报告。请到设置中填写。`,
-    };
-  }
-
-  if (!getLLMProvider(providerId)) {
-    return {
-      ok: false,
-      reason: `未知大模型 Provider：${providerId}`,
-    };
-  }
-
-  if (isLocal && !model) {
-    return {
-      ok: false,
-      reason: "本地 Ollama 未填写 model 名称，无法生成复盘报告。",
-    };
-  }
-
-  return {
-    ok: true,
-    config: {
-      providerId,
-      apiKey: apiKey || (isLocal ? "ollama" : undefined),
-      baseUrl: baseUrl || undefined,
-      model: model || undefined,
-      temperature: 0.3,
-    },
-  };
-}
-
 function computeMetrics(session: TrainingSession): {
   text: string;
   metrics: SessionMetrics;
+  coverage: ReturnType<typeof selectAnalysisText>["coverage"];
 } {
-  let text = session.finalTranscript ?? "";
+  const fullText = session.finalTranscript ?? "";
   const debateUserTurns = session.debate?.turns.filter(
     (turn) => turn.role === "user" && turn.text.trim(),
   );
-  let metricsText = debateUserTurns?.length
+  const metricsText = debateUserTurns?.length
     ? debateUserTurns.map((turn) => turn.text).join("\n")
-    : text;
-  if (metricsText.length > MAX_CHARS_FOR_METRICS) {
-    metricsText = metricsText.slice(0, MAX_CHARS_FOR_METRICS);
-  }
-  if (text.length > MAX_CHARS_FOR_METRICS) {
-    text = text.slice(0, MAX_CHARS_FOR_METRICS);
-  }
+    : fullText;
+  const selected = selectAnalysisText(fullText);
 
   const finalSegs = session.debate
     ? (debateUserTurns ?? []).map((turn) => ({
@@ -218,7 +163,7 @@ function computeMetrics(session: TrainingSession): {
     utteranceCount: Math.max(1, utterances.length || 1),
   });
 
-  return { text, metrics };
+  return { text: selected.text, metrics, coverage: selected.coverage };
 }
 
 /**
@@ -232,7 +177,7 @@ export async function analyzeSession(
   onProgress?: (progress: LLMStreamProgress) => void,
 ): Promise<AnalyzeResult> {
   await yieldUi();
-  const { text, metrics } = computeMetrics(session);
+  const { text, metrics, coverage } = computeMetrics(session);
 
   if (!text.trim()) {
     throw new LlmReviewError(
@@ -279,6 +224,7 @@ export async function analyzeSession(
       report: {
         ...llmReport,
         source: "llm",
+        analysisCoverage: coverage,
       },
       usedLlm: true,
     };

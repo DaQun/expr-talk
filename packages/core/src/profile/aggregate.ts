@@ -182,10 +182,14 @@ function buildTrends(sessions: TrainingSession[]): ProfileTrend[] {
 
 export function buildUserProfile(allSessions: TrainingSession[]): UserProfile {
   const sessions = allSessions
-    .filter((session) => session.report && session.metrics)
+    .filter(
+      (session) =>
+        (session.status === "reviewed" || session.status === "completed") &&
+        session.report &&
+        session.metrics,
+    )
     .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
-  const retries = allSessions.filter((session) => session.parentSessionId);
-  const retryResults = retries.filter((session) => session.comparison != null);
+  const retryResults = sessions.filter((session) => session.comparison != null);
   const retrySuccesses = retryResults.filter(
     (session) => session.comparison?.improved,
   ).length;
@@ -205,7 +209,7 @@ export function buildUserProfile(allSessions: TrainingSession[]): UserProfile {
   const focusIssue = recurringIssues[0];
   const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
   const activeDays30 = new Set(
-    allSessions
+    sessions
       .filter((session) => Date.parse(session.startedAt) >= cutoff)
       .map((session) => session.startedAt.slice(0, 10)),
   ).size;
@@ -218,14 +222,18 @@ export function buildUserProfile(allSessions: TrainingSession[]): UserProfile {
         : sessions.length < 6
           ? "preliminary"
           : "established",
-    sessionCount: allSessions.length,
+    sessionCount: sessions.length,
+    attemptCount: allSessions.length,
+    interruptedSessionCount: allSessions.filter(
+      (session) => session.status === "failed",
+    ).length,
     reviewedSessionCount: sessions.length,
-    retryCount: retries.length,
+    retryCount: retryResults.length,
     retrySuccessRate:
       retryResults.length > 0
         ? rounded((retrySuccesses / retryResults.length) * 100)
         : undefined,
-    totalDurationSec: allSessions.reduce(
+    totalDurationSec: sessions.reduce(
       (sum, session) =>
         sum + (session.durationSec ?? session.metrics?.durationSec ?? 0),
       0,

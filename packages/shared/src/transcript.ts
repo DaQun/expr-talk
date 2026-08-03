@@ -19,6 +19,7 @@ export type Utterance = {
   startMs?: number;
   endMs?: number;
   segmentIds: string[];
+  timeSource?: "segment" | "estimated" | "none";
   metrics?: UtteranceMetrics;
   feedback?: SentenceFeedback;
 };

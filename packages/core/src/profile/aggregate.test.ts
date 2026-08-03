@@ -70,4 +70,27 @@ describe("buildUserProfile", () => {
       ),
     );
   });
+
+  it("keeps failed and unfinished attempts out of progress metrics", () => {
+    const reviewed = session(0);
+    const failed: TrainingSession = {
+      ...session(1),
+      id: "failed",
+      status: "failed",
+      durationSec: 600,
+      report: undefined,
+      metrics: undefined,
+    };
+    const created: TrainingSession = {
+      ...failed,
+      id: "created",
+      status: "created",
+    };
+    const profile = buildUserProfile([reviewed, failed, created]);
+    assert.equal(profile.attemptCount, 3);
+    assert.equal(profile.sessionCount, 1);
+    assert.equal(profile.reviewedSessionCount, 1);
+    assert.equal(profile.interruptedSessionCount, 1);
+    assert.equal(profile.totalDurationSec, 60);
+  });
 });

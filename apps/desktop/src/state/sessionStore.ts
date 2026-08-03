@@ -20,8 +20,6 @@ import {
 } from "@expr-talk/shared";
 import { compareAttempts, formatFinalAsrSegment, joinFinalSegments } from "@expr-talk/core";
 import {
-  mergeFeynmanCheckpoints,
-  shouldCompleteFeynmanTurn,
   type LLMStreamProgress,
 } from "@expr-talk/llm";
 import { api } from "../ipc/client";
@@ -30,6 +28,20 @@ import type { AsrEventPayload, AsrModelStatus } from "../ipc/audio";
 import { audioApi } from "../ipc/audio";
 import { withTimeout } from "../utils/timeout";
 import { useSettingsStore } from "./settingsStore";
+import { resolveLlmConfig } from "../services/llmReadiness";
+import {
+  finishFeynmanEvaluation,
+  formatDebateTranscript,
+  initialDebateState,
+  interactiveQuestionLabel,
+  isInteractiveMode,
+  matchesActiveRecording,
+  recordingIdsForSession,
+  shouldFinishFeynmanRound,
+  turnRecordingId,
+  withoutSessionRecordings,
+  withFeynmanCheckpoints,
+} from "./sessionLifecycle";
 
 async function resolveAsrOptions(): Promise<{
   asrProvider: string;
@@ -111,6 +123,13 @@ type SessionState = {
 let activeRecorder: MicRecorder | null = null;
 let startLock = false;
 
+async function ensureLlmReady(): Promise<void> {
+  const store = useSettingsStore.getState();
+  if (!store.loaded) await store.load();
+  const ready = resolveLlmConfig(useSettingsStore.getState().settings);
+  if (!ready.ok) throw new Error(ready.reason);
+}
+
 function revokeLastWavUrl(url: string | null) {
   if (url) URL.revokeObjectURL(url);
 }
@@ -146,17 +165,30 @@ function createLlmProgressReporter(
 
 function extractStreamedQuestion(content?: string): string | null {
   if (!content?.trim()) return null;
-  const match = content.match(/"question"\s*:\s*"((?:\\.|[^"\\])*)/);
-  if (!match) return null;
 
   try {
-    const question = JSON.parse(`"${match[1]}"`);
+    const parsed = JSON.parse(content);
+    if (parsed && typeof parsed.question === "string" && parsed.question.trim()) {
+      return parsed.question.trim();
+    }
+    return null;
+  } catch {
+    // JSON incomplete — best-effort partial extraction
+  }
+
+  const match = content.match(/"question"\s*:\s*"((?:\\.|[^"\\])*)/);
+  if (!match) return null;
+  const raw = match[1];
+  try {
+    const question = JSON.parse(`"${raw}"`);
     return typeof question === "string" && question.trim() ? question : null;
   } catch {
-    return match[1]
+    const unescaped = raw
       .replace(/\\n/g, "\n")
+      .replace(/\\t/g, "\t")
       .replace(/\\"/g, '"')
-      .trim() || null;
+      .replace(/\\\\/g, "\\");
+    return unescaped.trim() || null;
   }
 }
 
@@ -178,116 +210,12 @@ function localId(): string {
   return `ses_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function turnRecordingId(sessionId: string, round: number): string {
-  return `${sessionId}_turn_${round}_${Date.now().toString(36)}`;
-}
-
-function recordingIdsForSession(session: TrainingSession): string[] {
-  const ids = [
-    session.id,
-    ...(session.debate?.turns ?? []).flatMap((turn) =>
-      turn.audioRecordingId ? [turn.audioRecordingId] : [],
-    ),
-  ];
-  return [...new Set(ids)];
-}
-
 async function discardSessionRecordings(session: TrainingSession): Promise<void> {
   await Promise.all(
     recordingIdsForSession(session).map((id) =>
       audioApi.discard(id).catch(() => undefined),
     ),
   );
-}
-
-function withoutSessionRecordings(session: TrainingSession): TrainingSession {
-  return {
-    ...session,
-    audioFile: undefined,
-    debate: session.debate
-      ? {
-          ...session.debate,
-          turns: session.debate.turns.map(
-            ({ audioFile: _audioFile, audioRecordingId: _recordingId, ...turn }) =>
-              turn,
-          ),
-        }
-      : undefined,
-  };
-}
-
-function isInteractiveMode(mode: PracticeMode): mode is "debate" | "feynman" {
-  return mode === "debate" || mode === "feynman";
-}
-
-function isFeynmanMode(mode: PracticeMode): boolean {
-  return mode === "feynman";
-}
-
-function interactiveQuestionLabel(mode: PracticeMode): string {
-  return isFeynmanMode(mode) ? "小白提问" : "反方质询";
-}
-
-const FEYNMAN_CHECKPOINTS: FeynmanCheckpoint[] = [
-  { id: "definition", status: "not_started" },
-  { id: "mechanism", status: "not_started" },
-  { id: "example", status: "not_started" },
-  { id: "boundary", status: "not_started" },
-];
-
-function initialDebateState(
-  kind: "debate" | "feynman" = "debate",
-  feynman?: { learnerRole: FeynmanLearnerRole; difficulty: FeynmanDifficulty },
-): DebateState {
-  return {
-    kind,
-    phase: "opening",
-    currentRound: 1,
-    turns: [],
-    ...(kind === "feynman"
-      ? {
-          feynman: {
-            learnerRole: feynman?.learnerRole ?? "outsider",
-            difficulty: feynman?.difficulty ?? "standard",
-            checkpoints: FEYNMAN_CHECKPOINTS.map((checkpoint) => ({ ...checkpoint })),
-          },
-        }
-      : {}),
-  };
-}
-
-function withFeynmanCheckpoints(
-  state: DebateState,
-  checkpoints: FeynmanCheckpoint[] | undefined,
-): DebateState {
-  if (!state.feynman || !checkpoints?.length) return state;
-  return {
-    ...state,
-    feynman: {
-      ...state.feynman,
-      checkpoints: mergeFeynmanCheckpoints(
-        state.feynman.checkpoints,
-        checkpoints,
-      ),
-    },
-  };
-}
-
-function formatDebateTranscript(debate: DebateState): string {
-  const isFeynman = debate.kind === "feynman";
-  return debate.turns
-    .map((turn) =>
-      turn.role === "user"
-        ? `第 ${turn.round} 轮，${isFeynman ? "讲解" : "我方"}：${turn.text}`
-        : `第 ${turn.round} 轮，${
-            isFeynman
-              ? turn.text.startsWith("我已经理解")
-                ? "小白确认"
-                : "小白提问"
-              : "反方质询"
-          }：${turn.text}`,
-    )
-    .join("\n");
 }
 
 async function generateInteractiveQuestion(
@@ -343,80 +271,68 @@ async function completeInteractiveSession(
   return { session: reviewed, report };
 }
 
-function completeFeynmanState(
-  state: DebateState,
-  focus: string,
-  checkpoints?: FeynmanCheckpoint[],
-): DebateState {
-  return {
-    ...withFeynmanCheckpoints(state, checkpoints),
-    phase: "completed",
-    pendingQuestion: undefined,
-    turns: [
-      ...state.turns,
-      {
-        id: `feynman_understood_${Date.now()}`,
-        role: "opponent",
-        round: state.currentRound,
-        text: focus
-          ? `我已经理解：${focus}`
-          : "我已经理解这个概念了。",
-        createdAt: new Date().toISOString(),
-      },
-    ],
-  };
-}
+type InteractiveQuestionOutcome =
+  | { kind: "completed"; session: TrainingSession; report: StructuredReport }
+  | { kind: "continuing"; waiting: TrainingSession };
 
-function shouldFinishFeynmanRound(
+async function handleInteractiveQuestionResult(
   session: TrainingSession,
-  result: { understood: boolean },
-): boolean {
-  return (
-    session.mode === "feynman" &&
-    shouldCompleteFeynmanTurn(
-      session.debate?.currentRound ?? 0,
-      result.understood,
-    )
-  );
-}
-
-function finishFeynmanEvaluation(
-  state: DebateState,
-  result: {
-    understood: boolean;
-    focus?: string;
-    checkpoints?: FeynmanCheckpoint[];
-  },
-): DebateState {
-  if (result.understood) {
-    return completeFeynmanState(
-      state,
-      result.focus ?? "",
-      result.checkpoints,
-    );
+  debate: DebateState,
+  result: { question: string; understood: boolean; focus?: string; checkpoints?: FeynmanCheckpoint[] },
+  round: number,
+  set: (partial: Partial<SessionState>) => void,
+): Promise<InteractiveQuestionOutcome> {
+  if (shouldFinishFeynmanRound(session, result)) {
+    set({
+      analyzeNote: result.understood
+        ? "小白已经听懂，正在生成整场复盘…"
+        : "已达到 6 轮，正在生成整场复盘…",
+    });
+    const finished: TrainingSession = {
+      ...session,
+      debate: finishFeynmanEvaluation(debate, result),
+    };
+    await api.updateSession(finished);
+    const completed = await completeInteractiveSession(finished, set);
+    return { kind: "completed", session: completed.session, report: completed.report };
   }
-  return {
-    ...withFeynmanCheckpoints(state, result.checkpoints),
-    phase: "completed",
-    pendingQuestion: undefined,
-    turns: [
-      ...state.turns,
-      {
-        id: `feynman_round_limit_${Date.now()}`,
-        role: "opponent",
-        round: state.currentRound,
-        text: "本次讲解已达到 6 轮，先结束追问并进入复盘。",
-        createdAt: new Date().toISOString(),
-      },
-    ],
+
+  const opponentTurn = {
+    id: `debate_opponent_${Date.now()}`,
+    role: "opponent" as const,
+    round,
+    text: result.question,
+    createdAt: new Date().toISOString(),
   };
+  const nextDebate: DebateState = {
+    ...withFeynmanCheckpoints(debate, result.checkpoints),
+    phase: "cross_examination",
+    pendingQuestion: result.question,
+    turns: [...debate.turns, opponentTurn],
+  };
+  const waiting: TrainingSession = {
+    ...session,
+    status: "debating",
+    debate: nextDebate,
+    finalTranscript: formatDebateTranscript(nextDebate),
+  };
+  await api.updateSession(waiting);
+  return { kind: "continuing", waiting };
 }
 
 function applyAsrEvent(
   get: () => SessionState,
   set: (partial: Partial<SessionState>) => void,
+  recordingId: string,
   ev: AsrEventPayload,
 ) {
+  if (
+    ev.sessionId !== recordingId ||
+    activeRecorder?.recordingId !== recordingId ||
+    !matchesActiveRecording(get().current, recordingId)
+  ) {
+    return;
+  }
   if (ev.type === "ready") {
     set({
       asrStatus: ev.message ?? "ASR 就绪",
@@ -487,7 +403,15 @@ async function buildComparison(
   });
 }
 
-export const useSessionStore = create<SessionState>((set, get) => ({
+export const useSessionStore = create<SessionState>((rawSet, get) => {
+  const set: (partial: Partial<SessionState>) => void = (partial) => {
+    if ("analyzing" in partial) {
+      rawSet({ ...partial, streamedQuestion: null });
+    } else {
+      rawSet(partial);
+    }
+  };
+  return {
   current: null,
   report: null,
   comparison: null,
@@ -538,6 +462,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   createAndStart: async () => {
     if (startLock) return;
     if (get().current?.status === "recording" && activeRecorder?.isRunning) {
+      return;
+    }
+    try {
+      await ensureLlmReady();
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
       return;
     }
     startLock = true;
@@ -612,7 +542,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         asrConfig,
         onLevel: (rms) => set({ level: rms }),
         onError: (err) => set({ error: err.message }),
-        onAsrEvent: (ev) => applyAsrEvent(get, set, ev),
+        onAsrEvent: (ev) => applyAsrEvent(get, set, provisional.id, ev),
         onStatus: (msg) => set({ asrStatus: msg }),
       });
 
@@ -650,6 +580,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       current.status !== "debating" ||
       !current.debate?.pendingQuestion
     ) {
+      return;
+    }
+    try {
+      await ensureLlmReady();
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
       return;
     }
     startLock = true;
@@ -693,7 +629,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         asrConfig,
         onLevel: (rms) => set({ level: rms }),
         onError: (err) => set({ error: err.message }),
-        onAsrEvent: (ev) => applyAsrEvent(get, set, ev),
+        onAsrEvent: (ev) => applyAsrEvent(get, set, recordingId, ev),
         onStatus: (msg) => set({ asrStatus: msg }),
       });
       await recorder.startLocalOnly();
@@ -711,6 +647,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   startRetry: async (parentSessionId: string) => {
     if (startLock) return false;
+    try {
+      await ensureLlmReady();
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+      return false;
+    }
     startLock = true;
 
     try {
@@ -863,7 +805,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         asrConfig,
         onLevel: (rms) => set({ level: rms }),
         onError: (err) => set({ error: err.message }),
-        onAsrEvent: (ev) => applyAsrEvent(get, set, ev),
+        onAsrEvent: (ev) => applyAsrEvent(get, set, provisional.id, ev),
         onStatus: (msg) => set({ asrStatus: msg }),
       });
 
@@ -1182,37 +1124,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
                 : "已达到 6 轮，正在生成整场复盘…",
             });
           } else {
-            const opponentTurn = {
-              id: `debate_opponent_${Date.now()}`,
-              role: "opponent" as const,
-              round,
-              text: result.question,
-              createdAt: new Date().toISOString(),
-            };
-            const nextDebate: DebateState = {
-              ...withFeynmanCheckpoints(debateWithUser, result.checkpoints),
-              phase: "cross_examination",
-              pendingQuestion: result.question,
-              turns: [...debateWithUser.turns, opponentTurn],
-            };
-            const waiting: TrainingSession = {
-              ...sessionForAnalyze,
-              status: "debating",
-              debate: nextDebate,
-              finalTranscript: formatDebateTranscript(nextDebate),
-            };
-            await api.updateSession(waiting);
-            set({
-              current: waiting,
-              liveSegments: [],
-              partialText: "",
-              level: 0,
-              analyzing: false,
-              streamedQuestion: null,
-              analyzeNote: `第 ${round} 轮${questionLabel}已到`,
-              error: null,
-            });
-            return false;
+            const outcome = await handleInteractiveQuestionResult(
+              sessionForAnalyze, debateWithUser, result, round, set,
+            );
+            // "continuing" is the only possible outcome here (completed handled above)
+            if (outcome.kind === "continuing") {
+              set({
+                current: outcome.waiting,
+                liveSegments: [],
+                partialText: "",
+                level: 0,
+                analyzing: false,
+                analyzeNote: `第 ${round} 轮${questionLabel}已到`,
+                error: null,
+              });
+              return false;
+            }
           }
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -1227,7 +1154,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           set({
             current: waiting,
             analyzing: false,
-            streamedQuestion: null,
             error: msg,
             analyzeNote: `${questionLabel}生成失败，可重试`,
             liveSegments: [],
@@ -1283,6 +1209,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         level: 0,
         lastWavUrl: wavUrl,
         lastAudioPath: audioPath ?? null,
+        liveSegments: [],
         partialText: "",
         retryParentId: null,
         analyzeNote: comparison
@@ -1326,6 +1253,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           level: 0,
           lastWavUrl: wavUrl,
           lastAudioPath: audioPath ?? null,
+          liveSegments: [],
+          partialText: "",
         });
       } else {
         set({
@@ -1345,72 +1274,46 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const current = get().current;
     if (!current?.debate || !isInteractiveMode(current.mode)) return;
     const questionLabel = interactiveQuestionLabel(current.mode);
+    try {
+      await ensureLlmReady();
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
     set({
       analyzing: true,
       error: null,
       analyzeNote: `${questionLabel}生成中…`,
-      streamedQuestion: null,
     });
     try {
       const result = await generateInteractiveQuestion(
         current,
         createInteractiveProgressReporter(set),
       );
-      if (shouldFinishFeynmanRound(current, result)) {
+      const outcome = await handleInteractiveQuestionResult(
+        current, current.debate, result, current.debate.currentRound, set,
+      );
+      if (outcome.kind === "completed") {
         set({
-          analyzeNote: result.understood
-            ? "小白已经听懂，正在生成整场复盘…"
-            : "已达到 6 轮，正在生成整场复盘…",
-        });
-        const understood = {
-          ...current,
-          debate: finishFeynmanEvaluation(current.debate, result),
-        };
-        const completed = await completeInteractiveSession(understood, set);
-        set({
-          current: completed.session,
-          report: completed.report,
+          current: outcome.session,
+          report: outcome.report,
           comparison: null,
           analyzing: false,
-          streamedQuestion: null,
           analyzeNote: "完成：费曼学习复盘",
           error: null,
         });
         return;
       }
-      const turn = {
-        id: `debate_opponent_${Date.now()}`,
-        role: "opponent" as const,
-        round: current.debate.currentRound,
-        text: result.question,
-        createdAt: new Date().toISOString(),
-      };
-      const debate: DebateState = {
-        ...withFeynmanCheckpoints(current.debate, result.checkpoints),
-        phase: "cross_examination",
-        pendingQuestion: result.question,
-        turns: [...current.debate.turns, turn],
-      };
-      const waiting = {
-        ...current,
-        status: "debating" as const,
-        debate,
-        finalTranscript: formatDebateTranscript(debate),
-        failureReason: undefined,
-      };
-      await api.updateSession(waiting);
       set({
-        current: waiting,
+        current: outcome.waiting,
         analyzing: false,
         analyzeNote: `${questionLabel}已到`,
-        streamedQuestion: null,
       });
     } catch (e) {
       set({
         analyzing: false,
         error: e instanceof Error ? e.message : String(e),
         analyzeNote: `${questionLabel}生成失败，可重试`,
-        streamedQuestion: null,
       });
     }
   },
@@ -1439,11 +1342,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
 
     const questionLabel = interactiveQuestionLabel(current.mode);
+    try {
+      await ensureLlmReady();
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+      return false;
+    }
     set({
       analyzing: true,
       error: null,
       analyzeNote: "正在提交本轮文字回应…",
-      streamedQuestion: null,
     });
     const round = current.debate.currentRound + 1;
     const debateWithUser: DebateState = {
@@ -1489,57 +1397,27 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         updated,
         createInteractiveProgressReporter(set),
       );
-      if (shouldFinishFeynmanRound(updated, result)) {
+      const outcome = await handleInteractiveQuestionResult(
+        updated, debateWithUser, result, round, set,
+      );
+      if (outcome.kind === "completed") {
         set({
-          analyzeNote: result.understood
-            ? "小白已经听懂，正在生成整场复盘…"
-            : "已达到 6 轮，正在生成整场复盘…",
-        });
-        const understood = {
-          ...updated,
-          debate: finishFeynmanEvaluation(debateWithUser, result),
-        };
-        const completed = await completeInteractiveSession(understood, set);
-        set({
-          current: completed.session,
-          report: completed.report,
+          current: outcome.session,
+          report: outcome.report,
           comparison: null,
           pasteText: "",
           analyzing: false,
           analyzeNote: "完成：费曼学习复盘",
           error: null,
-          streamedQuestion: null,
         });
         return true;
       }
-      const nextDebate: DebateState = {
-        ...withFeynmanCheckpoints(debateWithUser, result.checkpoints),
-        pendingQuestion: result.question,
-        turns: [
-          ...debateWithUser.turns,
-          {
-            id: `debate_opponent_${Date.now()}`,
-            role: "opponent",
-            round,
-            text: result.question,
-            createdAt: new Date().toISOString(),
-          },
-        ],
-      };
-      const waiting: TrainingSession = {
-        ...updated,
-        status: "debating",
-        debate: nextDebate,
-        finalTranscript: formatDebateTranscript(nextDebate),
-      };
-      await api.updateSession(waiting);
       set({
-        current: waiting,
+        current: outcome.waiting,
         pasteText: "",
         analyzing: false,
         analyzeNote: `第 ${round} 轮${questionLabel}已到`,
         error: null,
-        streamedQuestion: null,
       });
       return false;
     } catch (e) {
@@ -1556,7 +1434,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         analyzing: false,
         error: msg,
         analyzeNote: "本轮提交失败，内容已保留",
-        streamedQuestion: null,
       });
       return false;
     }
@@ -1566,8 +1443,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (get().analyzing) return;
     const current = get().current;
     if (!current?.debate || !isInteractiveMode(current.mode)) return;
+    try {
+      await ensureLlmReady();
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
     const feynmanMode = current.mode === "feynman";
+    // 立即收起待答问题，避免生成复盘期间界面停留在“小白正在追问”的旧状态
+    const settled: TrainingSession =
+      current.debate.pendingQuestion || get().streamedQuestion
+        ? {
+            ...current,
+            debate: { ...current.debate, pendingQuestion: undefined },
+          }
+        : current;
     set({
+      current: settled,
       analyzing: true,
       error: null,
       analyzeNote: feynmanMode
@@ -1595,11 +1487,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   analyzePaste: async () => {
     if (get().analyzing) return;
+    try {
+      await ensureLlmReady();
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
     set({
       analyzing: true,
       error: null,
       analyzeNote: "分析粘贴文本…",
-      streamedQuestion: null,
+      liveSegments: [],
+      partialText: "",
+      level: 0,
     });
     let pastedSession: TrainingSession | null = null;
     try {
@@ -1665,57 +1565,27 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           stopped,
           createInteractiveProgressReporter(set),
         );
-        if (shouldFinishFeynmanRound(stopped, result)) {
+        const outcome = await handleInteractiveQuestionResult(
+          stopped, debate, result, 1, set,
+        );
+        if (outcome.kind === "completed") {
           set({
-            analyzeNote: result.understood
-              ? "小白已经听懂，正在生成整场复盘…"
-              : "已达到 6 轮，正在生成整场复盘…",
-          });
-          const understood = {
-            ...stopped,
-            debate: finishFeynmanEvaluation(debate, result),
-          };
-          const completed = await completeInteractiveSession(understood, set);
-          set({
-            current: completed.session,
-            report: completed.report,
+            current: outcome.session,
+            report: outcome.report,
             comparison: null,
             analyzing: false,
             analyzeNote: "完成：费曼学习复盘",
             pasteText: "",
             error: null,
-            streamedQuestion: null,
           });
           return;
         }
-        const nextDebate: DebateState = {
-          ...withFeynmanCheckpoints(debate, result.checkpoints),
-          pendingQuestion: result.question,
-          turns: [
-            ...debate.turns,
-            {
-              id: `debate_opponent_${Date.now()}`,
-              role: "opponent",
-              round: 1,
-              text: result.question,
-              createdAt: new Date().toISOString(),
-            },
-          ],
-        };
-        const waiting: TrainingSession = {
-          ...stopped,
-          status: "debating",
-          debate: nextDebate,
-          finalTranscript: formatDebateTranscript(nextDebate),
-        };
-        await api.updateSession(waiting);
         set({
-          current: waiting,
+          current: outcome.waiting,
           analyzing: false,
           analyzeNote: `第 1 轮${questionLabel}已到`,
           pasteText: "",
           error: null,
-          streamedQuestion: null,
         });
         return;
       }
@@ -1750,7 +1620,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({
         error: msg,
         report: null,
-        streamedQuestion: null,
       });
     } finally {
       set({ analyzing: false });
@@ -1948,4 +1817,5 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ analyzing: false });
     }
   },
-}));
+  };
+});

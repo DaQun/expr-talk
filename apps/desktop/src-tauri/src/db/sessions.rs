@@ -269,7 +269,6 @@ pub fn list_profile_sessions(state: &DbState) -> Result<Vec<Value>, String> {
 SELECT id, mode, status, started_at, duration_sec, metrics_json, report_json,
        parent_session_id, round, comparison_json, target_issue
 FROM sessions
-WHERE metrics_json IS NOT NULL OR report_json IS NOT NULL OR parent_session_id IS NOT NULL
 ORDER BY started_at ASC
 "#,
         )
@@ -420,13 +419,106 @@ fn row_to_session_full(row: &rusqlite::Row<'_>) -> Result<Value, String> {
 }
 
 pub fn delete_session(state: &DbState, id: &str) -> Result<(), String> {
+    let mut conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    let tx = conn.transaction().map_err(|e| format!("delete session: {e}"))?;
+    {
+        let mut stmt = tx
+            .prepare("SELECT id, comparison_json FROM sessions WHERE parent_session_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let children = stmt
+            .query_map(params![id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        for (child_id, comparison_json) in children {
+            let comparison = comparison_json.map(|raw| {
+                let mut value = serde_json::from_str::<Value>(&raw).unwrap_or_else(|_| json!({}));
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("parentAvailable".into(), Value::Bool(false));
+                }
+                value.to_string()
+            });
+            tx.execute(
+                "UPDATE sessions SET parent_session_id = NULL, comparison_json = ?1 WHERE id = ?2",
+                params![comparison, child_id],
+            )
+            .map_err(|e| format!("detach retry child: {e}"))?;
+        }
+    }
+    tx.execute("DELETE FROM sessions WHERE id = ?1", params![id])
+        .map_err(|e| format!("delete session: {e}"))?;
+    tx.commit().map_err(|e| format!("commit delete session: {e}"))?;
+    Ok(())
+}
+
+pub fn delete_all_sessions(state: &DbState) -> Result<(), String> {
+    let mut conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    let tx = conn.transaction().map_err(|e| format!("clear sessions: {e}"))?;
+    tx.execute("DELETE FROM sessions", [])
+        .map_err(|e| format!("clear sessions: {e}"))?;
+    tx.commit().map_err(|e| format!("commit clear sessions: {e}"))
+}
+
+pub fn list_export_sessions(state: &DbState) -> Result<Vec<Value>, String> {
+    let ids = {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| "db lock poisoned".to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id FROM sessions ORDER BY started_at ASC")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
+    };
+    ids.iter()
+        .filter_map(|id| match load_session(state, id) {
+            Ok(Some(value)) => Some(Ok(value)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect()
+}
+
+pub fn count_sessions(state: &DbState) -> Result<u64, String> {
+    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+        .map_err(|e| format!("count sessions: {e}"))
+}
+
+/// 进程重启后不可能仍有录音器或运行中的分析任务；保留素材并标记为可恢复中断。
+pub fn reconcile_interrupted_sessions(state: &DbState) -> Result<usize, String> {
     let conn = state
         .conn
         .lock()
         .map_err(|_| "db lock poisoned".to_string())?;
-    conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])
-        .map_err(|e| format!("delete session: {e}"))?;
-    Ok(())
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        r#"
+UPDATE sessions
+SET status = 'failed',
+    ended_at = COALESCE(ended_at, ?1),
+    failure_reason = CASE status
+      WHEN 'recording' THEN '应用在录音期间退出，本轮已中断；已有录音和字幕已保留，可从复盘页恢复。'
+      WHEN 'transcribing' THEN '应用在转写期间退出；已有录音已保留，可重新转写。'
+      ELSE '应用在生成复盘期间退出；已有逐字稿已保留，可重新评审。'
+    END,
+    updated_at = ?1
+WHERE status IN ('recording', 'transcribing', 'analyzing', 'retrying')
+"#,
+        params![now],
+    )
+    .map_err(|e| format!("reconcile interrupted sessions: {e}"))
 }
 
 fn format_unix_iso(secs: i64) -> String {
@@ -450,7 +542,7 @@ fn format_unix_iso(secs: i64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_session, upsert_session};
+    use super::{delete_session, load_session, reconcile_interrupted_sessions, upsert_session};
     use crate::db::{schema, DbState};
     use rusqlite::Connection;
     use serde_json::json;
@@ -493,5 +585,58 @@ mod tests {
         let loaded = load_session(&state, "ses_test").unwrap().unwrap();
         assert_eq!(loaded["status"], "failed");
         assert_eq!(loaded["debate"]["currentRound"], 1);
+    }
+
+    #[test]
+    fn restart_marks_transient_sessions_failed_without_dropping_material() {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::migrate(&conn).unwrap();
+        let state = DbState { conn: Mutex::new(conn) };
+        upsert_session(&state, json!({
+            "id": "ses_interrupted",
+            "mode": "free",
+            "topic": "test",
+            "goal": "clarity",
+            "status": "recording",
+            "startedAt": "2026-07-28T00:00:00.000Z",
+            "audioFile": "/tmp/test.wav",
+            "liveTranscript": [{"id":"seg1","text":"保留字幕","isFinal":true}]
+        })).unwrap();
+
+        assert_eq!(reconcile_interrupted_sessions(&state).unwrap(), 1);
+        let loaded = load_session(&state, "ses_interrupted").unwrap().unwrap();
+        assert_eq!(loaded["status"], "failed");
+        assert_eq!(loaded["audioFile"], "/tmp/test.wav");
+        assert_eq!(loaded["liveTranscript"][0]["text"], "保留字幕");
+        assert!(loaded["failureReason"].as_str().unwrap().contains("已中断"));
+    }
+
+    #[test]
+    fn deleting_parent_keeps_child_comparison_snapshot() {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::migrate(&conn).unwrap();
+        let state = DbState { conn: Mutex::new(conn) };
+        let base = |id: &str| json!({
+            "id": id,
+            "mode": "free",
+            "topic": "test",
+            "goal": "clarity",
+            "status": "reviewed",
+            "startedAt": "2026-07-28T00:00:00.000Z",
+            "liveTranscript": []
+        });
+        upsert_session(&state, base("parent")).unwrap();
+        let mut child = base("child");
+        child["parentSessionId"] = json!("parent");
+        child["comparison"] = json!({
+            "parentSessionId":"parent", "round":2, "before":{}, "after":{}, "deltas":{},
+            "fillerDelta":0, "densityDelta":0, "improved":true, "successCriteriaMet":[], "notes":[]
+        });
+        upsert_session(&state, child).unwrap();
+
+        delete_session(&state, "parent").unwrap();
+        let loaded = load_session(&state, "child").unwrap().unwrap();
+        assert!(loaded["parentSessionId"].is_null());
+        assert_eq!(loaded["comparison"]["parentAvailable"], false);
     }
 }

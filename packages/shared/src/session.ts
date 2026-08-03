@@ -52,6 +52,8 @@ export type AttemptComparison = {
   /** 相对成功标准的判定说明 */
   successCriteriaMet: string[];
   notes: string[];
+  /** 父轮被删除后仍保留对比快照，但不再提供跳转。 */
+  parentAvailable?: boolean;
 };
 
 export type DebateTurnRole = "user" | "opponent";

@@ -29,6 +29,13 @@ export type TaskCheck = {
 
 export type ReportSource = "rule" | "llm";
 
+export type AnalysisCoverage = {
+  strategy: "full" | "sampled";
+  originalChars: number;
+  analyzedChars: number;
+  note?: string;
+};
+
 export type StructuredReport = {
   schemaVersion: number;
   summary: string;
@@ -45,6 +52,8 @@ export type StructuredReport = {
   nextPractice: NextPractice;
   /** 报告来源：规则引擎 / LLM（失败会降级为 rule） */
   source?: ReportSource;
+  /** 送入模型的文本覆盖范围；客观指标始终按全文计算。 */
+  analysisCoverage?: AnalysisCoverage;
 };
 
 export type LogicReview = {

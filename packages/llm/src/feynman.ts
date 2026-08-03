@@ -120,7 +120,12 @@ export async function generateFeynmanTurn(
     );
     result = parseFeynmanTurnResult(retryRaw);
     if (result.understood) {
-      throw new Error("首轮讲解必须先由小白提出一个追问");
+      result = {
+        ...result,
+        understood: false,
+        question: "你能用最简单的话说一下它到底是什么吗？",
+        focus: "核心定义",
+      };
     }
   }
   result = {

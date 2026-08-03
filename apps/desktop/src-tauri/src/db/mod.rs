@@ -8,8 +8,9 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
 pub use sessions::{
-    delete_session, list_profile_sessions, list_sessions, load_session, upsert_session,
-    HistoryQuery,
+    count_sessions, delete_all_sessions, delete_session, list_export_sessions,
+    list_profile_sessions, list_sessions, load_session, reconcile_interrupted_sessions,
+    upsert_session, HistoryQuery,
 };
 pub use settings::{load_settings_json, save_settings_json};
 

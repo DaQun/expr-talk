@@ -26,6 +26,7 @@ import {
 } from "@/components/GuidancePanel";
 import { audioApi } from "@/ipc/audio";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -528,6 +529,15 @@ export function ReviewPage() {
             </Button>
           )}
         </div>
+
+        {report.analysisCoverage?.strategy === "sampled" && (
+          <Alert>
+            <AlertTitle>本次报告使用长文本抽样</AlertTitle>
+            <AlertDescription>
+              {report.analysisCoverage.note} 已分析约 {report.analysisCoverage.analyzedChars} / {report.analysisCoverage.originalChars} 字。
+            </AlertDescription>
+          </Alert>
+        )}
 
         {!hasTranscript && (
           <GuidancePanel title="本轮无法完成诊断" items={emptyGuidance} />

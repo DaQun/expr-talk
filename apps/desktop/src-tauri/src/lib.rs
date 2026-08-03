@@ -15,13 +15,14 @@ use commands::{
         audio_stop,
     },
     history::{
-        app_health, history_get, history_list, profile_sessions, session_delete, session_upsert,
+        app_health, history_export, history_get, history_list, history_storage_stats,
+        profile_sessions, session_delete_complete, session_upsert,
     },
     llm::{llm_chat_completion, llm_list_models, llm_list_providers, llm_test_provider},
     session::{session_analyze, session_create, session_start_recording, session_stop_recording},
     settings_cmd::{settings_get, settings_save},
 };
-use db::open_db;
+use db::{open_db, reconcile_interrupted_sessions};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -35,6 +36,7 @@ pub fn run() {
             app.manage(handle);
             app.manage(AudioState::default());
             let db = open_db(app.handle())?;
+            reconcile_interrupted_sessions(&db)?;
             app.manage(db);
             Ok(())
         })
@@ -45,7 +47,7 @@ pub fn run() {
             session_stop_recording,
             session_analyze,
             session_upsert,
-            session_delete,
+            session_delete_complete,
             audio_start,
             audio_append_pcm,
             audio_append_pcm_bytes,
@@ -63,6 +65,8 @@ pub fn run() {
             llm_chat_completion,
             history_list,
             history_get,
+            history_export,
+            history_storage_stats,
             profile_sessions,
             settings_get,
             settings_save,

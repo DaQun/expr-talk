@@ -233,6 +233,31 @@ test("retries for a follow-up when the first Feynman explanation completes early
   }
 });
 
+test("falls back to a default question when retry still confirms understanding", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          { message: { content: '{"understood":true,"question":"","focus":"已理解"}' } },
+        ],
+      }),
+      { headers: { "Content-Type": "application/json" } },
+    );
+
+  try {
+    const result = await generateFeynmanTurn(
+      { kind: "feynman", phase: "opening", currentRound: 1, turns: [] },
+      "复利",
+      { providerId: "custom", baseUrl: "https://example.test/v1", apiKey: "test" },
+    );
+    assert.equal(result.understood, false);
+    assert.ok(result.question.length > 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("uses an injected native transport instead of fetch", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {

@@ -26,7 +26,7 @@ pub struct AudioStopResult {
     pub transcript: String,
 }
 
-fn recordings_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+pub(crate) fn recordings_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let base = app
         .path()
         .app_data_dir()
@@ -161,12 +161,27 @@ pub async fn audio_recording_path(
         return Ok(None);
     }
     let dir = recordings_dir(&app)?;
-    let path = dir.join(format!("{}.wav", session_id.trim()));
-    if path.is_file() {
-        Ok(Some(path.to_string_lossy().into_owned()))
-    } else {
-        Ok(None)
+    let session_id = session_id.trim();
+    let direct = dir.join(format!("{session_id}.wav"));
+    let mut candidates = if direct.is_file() { vec![direct] } else { Vec::new() };
+    if candidates.is_empty() {
+        let prefix = format!("{session_id}_turn_");
+        for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            let matches = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".wav"));
+            if matches {
+                candidates.push(path);
+            }
+        }
     }
+    candidates.sort_by_key(|path| path.metadata().and_then(|meta| meta.modified()).ok());
+    let Some(path) = candidates.pop() else { return Ok(None); };
+    super::super::audio::wav::repair_wav_file(&path)
+        .map_err(|e| format!("修复中断录音失败: {e}"))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 /// 结束 WAV 并等待 ASR flush；耗时工作均在 blocking 池中执行。
