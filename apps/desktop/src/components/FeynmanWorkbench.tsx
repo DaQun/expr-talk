@@ -177,6 +177,7 @@ export function FeynmanWorkbench({
   const [newSessionFrom, setNewSessionFrom] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const conversationRef = useRef<HTMLDivElement>(null);
+  const topicInputRef = useRef<HTMLTextAreaElement>(null);
   const session = current?.mode === "feynman" ? current : null;
   const debate = session?.debate;
   // 录音开始后状态会从 debating 切为 recording，但本轮仍需要看见小白的问题。
@@ -298,13 +299,23 @@ export function FeynmanWorkbench({
                     </Field>
                     <Field>
                       <Label htmlFor="feynman-topic-pick">推荐主题</Label>
-                      <Select value={topicId ?? "custom"} onValueChange={onTopicSelect}>
+                      <Select
+                        value={topicId ?? "custom"}
+                        onValueChange={(value) => {
+                          if (value === "custom") {
+                            onTopicSelect("custom");
+                            topicInputRef.current?.focus();
+                            return;
+                          }
+                          onTopicSelect(value);
+                        }}
+                      >
                         <SelectTrigger id="feynman-topic-pick">
                           <SelectValue placeholder="选择概念" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            {topicId === null && <SelectItem value="custom" disabled>自定义概念</SelectItem>}
+                            <SelectItem value="custom">自定义概念</SelectItem>
                             {topics
                               .filter((topic) => topicCategory === "全部" || topic.category === topicCategory)
                               .map((topic) => (
@@ -323,6 +334,7 @@ export function FeynmanWorkbench({
                   <Label htmlFor="feynman-topic">我要讲的概念</Label>
                   <Textarea
                     id="feynman-topic"
+                    ref={topicInputRef}
                     value={draftTopic}
                     onChange={(event) => onTopicChange(event.target.value)}
                     rows={3}

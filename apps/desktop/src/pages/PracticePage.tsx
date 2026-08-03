@@ -118,6 +118,7 @@ export function PracticePage() {
   const [inputMode, setInputMode] = useState<InputMode>("text");
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const transcriptAutoFollowRef = useRef(true);
+  const topicInputRef = useRef<HTMLTextAreaElement>(null);
   const recording = current?.status === "recording";
   const debateMode = draftMode === "debate";
   const feynmanMode = draftMode === "feynman";
@@ -274,6 +275,11 @@ export function PracticePage() {
   const ss = String(seconds % 60).padStart(2, "0");
 
   function selectTopic(id: string) {
+    if (id === "custom") {
+      setTopicId(null);
+      topicInputRef.current?.focus();
+      return;
+    }
     const topic = modeTopics.find((item) => item.id === id);
     if (!topic) return;
     setTopicId(topic.id);
@@ -740,11 +746,9 @@ export function PracticePage() {
                           />
                         </SelectTrigger>
                         <SelectContent position="popper">
-                          {topicId === null && (
-                            <SelectItem value="custom" disabled>
-                              自定义题目
-                            </SelectItem>
-                          )}
+                          <SelectItem value="custom">
+                            自定义题目
+                          </SelectItem>
                           {modeTopics
                             .filter(
                               (t) =>
@@ -786,6 +790,7 @@ export function PracticePage() {
                 <Label htmlFor="topic">题目（可改）</Label>
                 <Textarea
                   id="topic"
+                  ref={topicInputRef}
                   value={draftTopic}
                   onChange={(e) => {
                     setDraftTopic(e.target.value);
