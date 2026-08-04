@@ -11,7 +11,6 @@ import {
   generateFeynmanTurn,
   mergeFeynmanCheckpoints,
   parseFeynmanTurnResult,
-  shouldCompleteFeynmanTurn,
 } from "./feynman";
 
 const baseReport = {
@@ -55,12 +54,41 @@ test("parses dimension reviews and task checks defensively", () => {
 
   assert.equal(report.dimensionReviews?.content?.score, 100);
   assert.equal(report.dimensionReviews?.logic?.score, 100);
-  assert.equal(report.dimensionReviews?.content?.source, "mixed");
+  assert.equal(report.dimensionReviews?.content?.source, "llm");
   assert.equal(report.dimensionReviews?.voice, undefined);
   assert.equal(report.dimensionReviews?.expression, undefined);
   assert.deepEqual(report.taskChecks, [
     { label: "明确观点", status: "met", evidence: "开头给出了立场。" },
   ]);
+});
+
+test("normalizes free-form issue codes and ignores model-declared score sources", () => {
+  const report = parseStructuredReport(JSON.stringify({
+    ...baseReport,
+    dimensionReviews: {
+      logic: {
+        score: 65,
+        verdict: "论据不足。",
+        evidence: "只有结论。",
+        source: "objective",
+      },
+    },
+    topIssues: [
+      {
+        code: "MISSING_ARGUMENTS",
+        title: "缺乏论据支撑",
+        severity: "high",
+      },
+    ],
+    nextPractice: {
+      ...baseReport.nextPractice,
+      targetIssue: "缺乏论据支撑",
+    },
+  }));
+
+  assert.equal(report.topIssues[0]?.code, "unsupported_claim");
+  assert.equal(report.nextPractice.targetIssue, "unsupported_claim");
+  assert.equal(report.dimensionReviews?.logic?.source, "llm");
 });
 
 test("keeps version 2 reports compatible", () => {
@@ -175,12 +203,6 @@ test("keeps Feynman checkpoints monotonic across rounds", () => {
   );
 });
 
-test("ends Feynman questioning after six rounds", () => {
-  assert.equal(shouldCompleteFeynmanTurn(5, false), false);
-  assert.equal(shouldCompleteFeynmanTurn(6, false), true);
-  assert.equal(shouldCompleteFeynmanTurn(2, true), true);
-});
-
 test("rejects a Feynman continuation without a learner question", () => {
   assert.throws(
     () => parseFeynmanTurnResult('{"understood":false,"focus":"机制"}'),
@@ -188,7 +210,7 @@ test("rejects a Feynman continuation without a learner question", () => {
   );
 });
 
-test("retries for a follow-up when the first Feynman explanation completes early", async () => {
+test("rejects an early understood while checkpoints remain uncovered", async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async () => {
@@ -198,10 +220,7 @@ test("retries for a follow-up when the first Feynman explanation completes early
         choices: [
           {
             message: {
-              content:
-                calls === 1
-                  ? '{"understood":true,"question":"","focus":"已理解"}'
-                  : '{"understood":false,"question":"复利的累积是怎样发生的？","focus":"累积机制"}',
+              content: '{"understood":true,"question":"","focus":"已理解定义和累积机制"}',
             },
           },
         ],
@@ -216,10 +235,11 @@ test("retries for a follow-up when the first Feynman explanation completes early
       "复利",
       { providerId: "custom", baseUrl: "https://example.test/v1", apiKey: "test" },
     );
+    // 模型声称理解但没有任何检查点被覆盖：强制回到追问，不能跳过缺口
     assert.deepEqual(result, {
       understood: false,
-      question: "复利的累积是怎样发生的？",
-      focus: "累积机制",
+      question: "你能用最简单的话说一下它到底是什么吗？",
+      focus: "核心定义",
       checkpoints: [
         { id: "definition", status: "not_started" },
         { id: "mechanism", status: "not_started" },
@@ -227,32 +247,71 @@ test("retries for a follow-up when the first Feynman explanation completes early
         { id: "boundary", status: "not_started" },
       ],
     });
-    assert.equal(calls, 2);
+    assert.equal(calls, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("falls back to a default question when retry still confirms understanding", async () => {
+test("forces a boundary follow-up when the model claims understanding too early", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () =>
-    new Response(
+  globalThis.fetch = async () => {
+    return new Response(
       JSON.stringify({
         choices: [
-          { message: { content: '{"understood":true,"question":"","focus":"已理解"}' } },
+          {
+            message: {
+              content:
+                '{"understood":true,"question":"","focus":"已理解定义、机制和例子","checkpoints":[{"id":"definition","status":"understood","evidence":"本金和利息一起生息"},{"id":"mechanism","status":"understood","evidence":"第二年本金变110元"},{"id":"example","status":"understood","evidence":"100元变110元再变121元"},{"id":"boundary","status":"not_started"}]}',
+            },
+          },
         ],
       }),
       { headers: { "Content-Type": "application/json" } },
     );
+  };
 
   try {
     const result = await generateFeynmanTurn(
-      { kind: "feynman", phase: "opening", currentRound: 1, turns: [] },
+      {
+        kind: "feynman",
+        phase: "cross_examination",
+        currentRound: 2,
+        turns: [
+          {
+            id: "t1",
+            role: "opponent",
+            round: 1,
+            text: "复利是什么？",
+            createdAt: new Date().toISOString(),
+          },
+          {
+            id: "t2",
+            role: "user",
+            round: 1,
+            text: "复利是本金和利息一起再生息。",
+            createdAt: new Date().toISOString(),
+          },
+        ],
+        feynman: {
+          learnerRole: "child",
+          difficulty: "standard",
+          checkpoints: [
+            { id: "definition", status: "understood", evidence: "本金和利息一起生息" },
+            { id: "mechanism", status: "understood", evidence: "第二年本金变110元" },
+            { id: "example", status: "understood", evidence: "100元变110元再变121元" },
+            { id: "boundary", status: "not_started" },
+          ],
+        },
+      },
       "复利",
       { providerId: "custom", baseUrl: "https://example.test/v1", apiKey: "test" },
     );
+    // 边界与误解仍未讲清：即便模型说 understood，也必须追问边界
     assert.equal(result.understood, false);
-    assert.ok(result.question.length > 0);
+    assert.equal(result.question, "什么情况下它不适用，或者容易和什么弄混？");
+    assert.equal(result.focus, "边界与误解");
+    assert.equal(result.checkpoints[3]?.status, "not_started");
   } finally {
     globalThis.fetch = originalFetch;
   }

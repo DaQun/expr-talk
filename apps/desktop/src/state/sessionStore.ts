@@ -30,17 +30,15 @@ import { withTimeout } from "../utils/timeout";
 import { useSettingsStore } from "./settingsStore";
 import { resolveLlmConfig } from "../services/llmReadiness";
 import {
-  finishFeynmanEvaluation,
+  applyFeynmanEvaluation,
   formatDebateTranscript,
   initialDebateState,
   interactiveQuestionLabel,
   isInteractiveMode,
   matchesActiveRecording,
   recordingIdsForSession,
-  shouldFinishFeynmanRound,
   turnRecordingId,
   withoutSessionRecordings,
-  withFeynmanCheckpoints,
 } from "./sessionLifecycle";
 
 async function resolveAsrOptions(): Promise<{
@@ -271,45 +269,35 @@ async function completeInteractiveSession(
   return { session: reviewed, report };
 }
 
-type InteractiveQuestionOutcome =
-  | { kind: "completed"; session: TrainingSession; report: StructuredReport }
-  | { kind: "continuing"; waiting: TrainingSession };
+type InteractiveQuestionOutcome = {
+  waiting: TrainingSession;
+  learnerUnderstood: boolean;
+};
 
 async function handleInteractiveQuestionResult(
   session: TrainingSession,
   debate: DebateState,
   result: { question: string; understood: boolean; focus?: string; checkpoints?: FeynmanCheckpoint[] },
   round: number,
-  set: (partial: Partial<SessionState>) => void,
 ): Promise<InteractiveQuestionOutcome> {
-  if (shouldFinishFeynmanRound(session, result)) {
-    set({
-      analyzeNote: result.understood
-        ? "小白已经听懂，正在生成整场复盘…"
-        : "已达到 6 轮，正在生成整场复盘…",
-    });
-    const finished: TrainingSession = {
-      ...session,
-      debate: finishFeynmanEvaluation(debate, result),
-    };
-    await api.updateSession(finished);
-    const completed = await completeInteractiveSession(finished, set);
-    return { kind: "completed", session: completed.session, report: completed.report };
-  }
-
-  const opponentTurn = {
-    id: `debate_opponent_${Date.now()}`,
-    role: "opponent" as const,
-    round,
-    text: result.question,
-    createdAt: new Date().toISOString(),
-  };
-  const nextDebate: DebateState = {
-    ...withFeynmanCheckpoints(debate, result.checkpoints),
-    phase: "cross_examination",
-    pendingQuestion: result.question,
-    turns: [...debate.turns, opponentTurn],
-  };
+  const nextDebate: DebateState =
+    session.mode === "feynman"
+      ? applyFeynmanEvaluation(debate, result)
+      : {
+          ...debate,
+          phase: "cross_examination",
+          pendingQuestion: result.question,
+          turns: [
+            ...debate.turns,
+            {
+              id: `debate_opponent_${Date.now()}`,
+              role: "opponent" as const,
+              round,
+              text: result.question,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        };
   const waiting: TrainingSession = {
     ...session,
     status: "debating",
@@ -317,7 +305,7 @@ async function handleInteractiveQuestionResult(
     finalTranscript: formatDebateTranscript(nextDebate),
   };
   await api.updateSession(waiting);
-  return { kind: "continuing", waiting };
+  return { waiting, learnerUnderstood: session.mode === "feynman" && result.understood };
 }
 
 function applyAsrEvent(
@@ -437,10 +425,38 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
   setDraftMode: (mode) => {
     const m = normalizePracticeMode(mode);
     const topic = defaultTopicForMode(m);
+    const currentMode = get().current?.mode;
+    const modeChanged = currentMode !== undefined && currentMode !== m;
+    // 切换训练模式时清空上一场会话，避免旧对话残留到新模式
+    if (modeChanged) {
+      if (activeRecorder?.isRunning) {
+        void activeRecorder.discard().catch(() => undefined);
+        activeRecorder = null;
+      }
+      revokeLastWavUrl(get().lastWavUrl);
+    }
     set({
       draftMode: m,
       draftTopic: topic.prompt,
       draftGoal: DEFAULT_MODE_GOALS[m],
+      ...(modeChanged
+        ? {
+            current: null,
+            report: null,
+            comparison: null,
+            retryParentId: null,
+            error: null,
+            analyzeNote: null,
+            streamedQuestion: null,
+            level: 0,
+            liveSegments: [],
+            partialText: "",
+            lastWavUrl: null,
+            lastAudioPath: null,
+            asrStatus: null,
+            pasteText: "",
+          }
+        : {}),
     });
   },
   setDraftTopic: (topic) => set({ draftTopic: topic }),
@@ -578,7 +594,8 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
       !current ||
       !isInteractiveMode(current.mode) ||
       current.status !== "debating" ||
-      !current.debate?.pendingQuestion
+      !current.debate ||
+      (!current.debate.pendingQuestion && current.mode !== "feynman")
     ) {
       return;
     }
@@ -606,7 +623,10 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
         report: null,
         comparison: null,
         error: null,
-        analyzeNote: `第 ${next.debate?.currentRound ?? 2} 轮回应 · 请回应${interactiveQuestionLabel(current.mode)}`,
+        analyzeNote:
+          current.mode === "feynman" && !current.debate.pendingQuestion
+            ? `第 ${next.debate?.currentRound ?? 2} 轮讲解 · 继续补充`
+            : `第 ${next.debate?.currentRound ?? 2} 轮回应 · 请回应${interactiveQuestionLabel(current.mode)}`,
         streamedQuestion: null,
         level: 0,
         liveSegments: [],
@@ -1111,36 +1131,21 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
             sessionForAnalyze,
             createInteractiveProgressReporter(set),
           );
-          if (shouldFinishFeynmanRound(sessionForAnalyze, result)) {
-            sessionForAnalyze = {
-              ...sessionForAnalyze,
-              debate: finishFeynmanEvaluation(debateWithUser, result),
-            };
-            await api.updateSession(sessionForAnalyze);
-            set({
-              current: sessionForAnalyze,
-              analyzeNote: result.understood
-                ? "小白已经听懂，正在生成整场复盘…"
-                : "已达到 6 轮，正在生成整场复盘…",
-            });
-          } else {
-            const outcome = await handleInteractiveQuestionResult(
-              sessionForAnalyze, debateWithUser, result, round, set,
-            );
-            // "continuing" is the only possible outcome here (completed handled above)
-            if (outcome.kind === "continuing") {
-              set({
-                current: outcome.waiting,
-                liveSegments: [],
-                partialText: "",
-                level: 0,
-                analyzing: false,
-                analyzeNote: `第 ${round} 轮${questionLabel}已到`,
-                error: null,
-              });
-              return false;
-            }
-          }
+          const outcome = await handleInteractiveQuestionResult(
+            sessionForAnalyze, debateWithUser, result, round,
+          );
+          set({
+            current: outcome.waiting,
+            liveSegments: [],
+            partialText: "",
+            level: 0,
+            analyzing: false,
+            analyzeNote: outcome.learnerUnderstood
+              ? "小白已理解，你可以继续补充或手动结束"
+              : `第 ${round} 轮${questionLabel}已到`,
+            error: null,
+          });
+          return false;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           const waiting: TrainingSession = {
@@ -1213,9 +1218,11 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
         partialText: "",
         retryParentId: null,
         analyzeNote: comparison
-          ? comparison.improved
-            ? "完成：有进步！"
-            : "完成：对比已生成"
+          ? comparison.conclusive === false
+            ? "完成：对比结果暂不确定"
+            : comparison.improved
+              ? "完成：有进步"
+              : "完成：对比已生成"
           : "完成：大模型报告",
         analyzing: false,
         error: null,
@@ -1291,23 +1298,14 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
         createInteractiveProgressReporter(set),
       );
       const outcome = await handleInteractiveQuestionResult(
-        current, current.debate, result, current.debate.currentRound, set,
+        current, current.debate, result, current.debate.currentRound,
       );
-      if (outcome.kind === "completed") {
-        set({
-          current: outcome.session,
-          report: outcome.report,
-          comparison: null,
-          analyzing: false,
-          analyzeNote: "完成：费曼学习复盘",
-          error: null,
-        });
-        return;
-      }
       set({
         current: outcome.waiting,
         analyzing: false,
-        analyzeNote: `${questionLabel}已到`,
+        analyzeNote: outcome.learnerUnderstood
+          ? "小白已理解，你可以继续补充或手动结束"
+          : `${questionLabel}已到`,
       });
     } catch (e) {
       set({
@@ -1326,7 +1324,7 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
       !current?.debate ||
       !isInteractiveMode(current.mode) ||
       current.status !== "debating" ||
-      !current.debate.pendingQuestion
+      (!current.debate.pendingQuestion && current.mode !== "feynman")
     ) {
       set({
         error: `当前没有等待回应的${interactiveQuestionLabel(current?.mode ?? "debate")}`,
@@ -1398,25 +1396,15 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
         createInteractiveProgressReporter(set),
       );
       const outcome = await handleInteractiveQuestionResult(
-        updated, debateWithUser, result, round, set,
+        updated, debateWithUser, result, round,
       );
-      if (outcome.kind === "completed") {
-        set({
-          current: outcome.session,
-          report: outcome.report,
-          comparison: null,
-          pasteText: "",
-          analyzing: false,
-          analyzeNote: "完成：费曼学习复盘",
-          error: null,
-        });
-        return true;
-      }
       set({
         current: outcome.waiting,
         pasteText: "",
         analyzing: false,
-        analyzeNote: `第 ${round} 轮${questionLabel}已到`,
+        analyzeNote: outcome.learnerUnderstood
+          ? "小白已理解，你可以继续补充或手动结束"
+          : `第 ${round} 轮${questionLabel}已到`,
         error: null,
       });
       return false;
@@ -1566,24 +1554,14 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
           createInteractiveProgressReporter(set),
         );
         const outcome = await handleInteractiveQuestionResult(
-          stopped, debate, result, 1, set,
+          stopped, debate, result, 1,
         );
-        if (outcome.kind === "completed") {
-          set({
-            current: outcome.session,
-            report: outcome.report,
-            comparison: null,
-            analyzing: false,
-            analyzeNote: "完成：费曼学习复盘",
-            pasteText: "",
-            error: null,
-          });
-          return;
-        }
         set({
           current: outcome.waiting,
           analyzing: false,
-          analyzeNote: `第 1 轮${questionLabel}已到`,
+          analyzeNote: outcome.learnerUnderstood
+            ? "小白已理解，你可以继续补充或手动结束"
+            : `第 1 轮${questionLabel}已到`,
           pasteText: "",
           error: null,
         });

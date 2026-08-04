@@ -173,7 +173,7 @@ export function FeynmanWorkbench({
   onAbandon,
   onOpenReview,
 }: FeynmanWorkbenchProps) {
-  const [inputMode, setInputMode] = useState<InputMode>("text");
+  const [inputMode, setInputMode] = useState<InputMode>("voice");
   const [newSessionFrom, setNewSessionFrom] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const conversationRef = useRef<HTMLDivElement>(null);
@@ -191,6 +191,8 @@ export function FeynmanWorkbench({
   const checkpoints = visibleDebate?.feynman?.checkpoints ?? [];
   const activeRole = visibleDebate?.feynman?.learnerRole ?? learnerRole;
   const activeDifficulty = visibleDebate?.feynman?.difficulty ?? difficulty;
+  // 会话开始后以已保存的题目为准，避免草稿被后续操作改变后与本轮讲解不一致。
+  const learningTopic = (visibleDebate ? session?.topic ?? "" : draftTopic).trim();
   const canAbandon =
     Boolean(session) &&
     session?.status !== "reviewed" &&
@@ -215,8 +217,7 @@ export function FeynmanWorkbench({
   const canSubmitText =
     Boolean(pasteText.trim()) &&
     llmReady &&
-    !analyzing &&
-    (!hasStarted || Boolean(pendingQuestion));
+    !analyzing;
   const userTurns = visibleDebate?.turns.filter((turn) => turn.role === "user") ?? [];
   const conversationTurns =
     visibleDebate?.turns.filter(
@@ -228,12 +229,16 @@ export function FeynmanWorkbench({
         ),
     ) ?? [];
   const latestConversationTurn = conversationTurns[conversationTurns.length - 1];
+  const latestTurn = visibleDebate?.turns[visibleDebate.turns.length - 1];
+  const learnerUnderstood = Boolean(
+    latestTurn?.role === "opponent" && latestTurn.text.startsWith("我已经理解"),
+  );
 
   return (
     <div className="feynman-workbench flex flex-col gap-4">
       <PageHeader
         title="费曼学习"
-        description="把概念讲给小白听。小白只会根据你的讲解追问，直到能够自己复述。"
+        description="把概念讲给小白听。小白会追问或反馈理解，由你决定何时结束。"
         className="feynman-page-header"
         action={
           <div className="flex flex-wrap gap-2">
@@ -390,7 +395,8 @@ export function FeynmanWorkbench({
                 <div className="flex items-center gap-2">
                   {visibleDebate && <Badge variant="outline">第 {visibleDebate.currentRound} 轮</Badge>}
                   {recording && <Badge variant="warning">录音中</Badge>}
-                  {showingCompleted && <Badge variant="success">小白已理解</Badge>}
+                  {learnerUnderstood && <Badge variant="success">小白已理解</Badge>}
+                  {showingCompleted && <Badge variant="secondary">练习已结束</Badge>}
                 </div>
               </div>
             </CardHeader>
@@ -400,6 +406,18 @@ export function FeynmanWorkbench({
                 !conversationTurns.length && "min-h-[18rem]",
               )}
             >
+              {learningTopic && (
+                <section
+                  className="border-primary/20 bg-primary/6 rounded-lg border px-3.5 py-3"
+                  aria-label="当前学习内容"
+                >
+                  <div className="text-primary mb-1 flex items-center gap-1.5 text-xs font-medium">
+                    <Lightbulb className="size-3.5" aria-hidden /> 当前学习内容
+                  </div>
+                  <p className="m-0 text-sm leading-relaxed whitespace-pre-wrap">{learningTopic}</p>
+                </section>
+              )}
+
               {conversationTurns.length ? (
                 <div className="border-border bg-muted/35 rounded-lg border px-3 py-2.5">
                   <div className="flex items-center justify-between gap-3">
@@ -495,11 +513,11 @@ export function FeynmanWorkbench({
                       disabled={hasStarted}
                       aria-label="讲解输入方式"
                     >
-                      <ToggleGroupItem value="text" aria-label="文字输入">
-                        <Keyboard data-icon="inline-start" /> 文字
-                      </ToggleGroupItem>
                       <ToggleGroupItem value="voice" aria-label="语音输入">
                         <Mic data-icon="inline-start" /> 语音
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="text" aria-label="文字输入">
+                        <Keyboard data-icon="inline-start" /> 文字
                       </ToggleGroupItem>
                     </ToggleGroup>
                   </div>
@@ -509,7 +527,13 @@ export function FeynmanWorkbench({
                       <Textarea
                         value={pasteText}
                         onChange={(event) => onPasteTextChange(event.target.value)}
-                        placeholder={pendingQuestion ? "直接回答小白刚才的问题…" : "直接讲给小白听…"}
+                        placeholder={
+                          pendingQuestion
+                            ? "直接回答小白刚才的问题…"
+                            : learnerUnderstood
+                              ? "小白已理解，你仍可继续补充讲解…"
+                              : "直接讲给小白听…"
+                        }
                         disabled={analyzing || recording || isComplete}
                         rows={4}
                         className="min-h-28"
@@ -522,9 +546,9 @@ export function FeynmanWorkbench({
                     </>
                   ) : showVoiceRecorder ? (
                     recorderPanel
-                  ) : pendingQuestion ? (
+                  ) : hasStarted ? (
                     <Button disabled={analyzing || !llmReady} onClick={onStartResponse}>
-                      <Mic /> 开始录音讲解
+                      <Mic /> {pendingQuestion ? "开始录音讲解" : "继续补充讲解"}
                     </Button>
                   ) : (
                     <Button disabled={active || !llmReady} onClick={onStartVoice}>
@@ -534,7 +558,7 @@ export function FeynmanWorkbench({
                 </div>
               )}
 
-              {!pendingQuestion && !recording && hasStarted && !showingCompleted && (
+              {!pendingQuestion && !learnerUnderstood && !recording && hasStarted && !showingCompleted && (
                 <Button variant="secondary" disabled={analyzing || !llmReady} onClick={onRetryQuestion}>
                   <RefreshCw /> 重新生成小白提问
                 </Button>
@@ -555,7 +579,7 @@ export function FeynmanWorkbench({
 
               {showingCompleted && (
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-                  <p className="text-muted-foreground m-0 text-sm">小白已经能根据你的讲解理解这个概念。</p>
+                  <p className="text-muted-foreground m-0 text-sm">本次练习已由你结束，复盘报告已经生成。</p>
                   <div className="flex flex-wrap gap-2">
                     <Button
                       variant="secondary"

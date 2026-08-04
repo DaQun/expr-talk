@@ -15,9 +15,13 @@ export type SessionStatus =
   | "completed";
 
 export type MetricSnapshot = {
+  totalChars?: number;
   fillerCount: number;
+  fillerRate?: number;
   hedgeCount: number;
+  hedgeRate?: number;
   vagueWordCount: number;
+  vagueRate?: number;
   densityScore: number;
   wordsPerMinute?: number;
   clarity?: number;
@@ -35,8 +39,11 @@ export type AttemptComparison = {
   /** after - before；填充词/犹豫词负向变好，密度/清晰度正向变好 */
   deltas: {
     fillerDelta: number;
+    fillerRateDelta?: number;
     hedgeDelta: number;
+    hedgeRateDelta?: number;
     vagueDelta: number;
+    vagueRateDelta?: number;
     densityDelta: number;
     wpmDelta?: number;
     clarityDelta?: number;
@@ -49,6 +56,8 @@ export type AttemptComparison = {
   wpmDelta?: number;
   densityDelta: number;
   improved: boolean;
+  /** false 表示指标互相冲突或样本不足，不应给出二元进步结论。 */
+  conclusive?: boolean;
   /** 相对成功标准的判定说明 */
   successCriteriaMet: string[];
   notes: string[];

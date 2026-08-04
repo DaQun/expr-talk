@@ -6,10 +6,7 @@ import type {
   PracticeMode,
   TrainingSession,
 } from "@expr-talk/shared";
-import {
-  mergeFeynmanCheckpoints,
-  shouldCompleteFeynmanTurn,
-} from "@expr-talk/llm";
+import { mergeFeynmanCheckpoints } from "@expr-talk/llm";
 
 const FEYNMAN_CHECKPOINTS: FeynmanCheckpoint[] = [
   { id: "definition", status: "not_started" },
@@ -132,67 +129,32 @@ export function formatDebateTranscript(debate: DebateState): string {
     .join("\n");
 }
 
-function completeFeynmanState(
-  state: DebateState,
-  focus: string,
-  checkpoints?: FeynmanCheckpoint[],
-): DebateState {
-  return {
-    ...withFeynmanCheckpoints(state, checkpoints),
-    phase: "completed",
-    pendingQuestion: undefined,
-    turns: [
-      ...state.turns,
-      {
-        id: `feynman_understood_${Date.now()}`,
-        role: "opponent",
-        round: state.currentRound,
-        text: focus ? `我已经理解：${focus}` : "我已经理解这个概念了。",
-        createdAt: new Date().toISOString(),
-      },
-    ],
-  };
-}
-
-export function shouldFinishFeynmanRound(
-  session: TrainingSession,
-  result: { understood: boolean },
-): boolean {
-  return (
-    session.mode === "feynman" &&
-    shouldCompleteFeynmanTurn(
-      session.debate?.currentRound ?? 0,
-      result.understood,
-    )
-  );
-}
-
-export function finishFeynmanEvaluation(
+export function applyFeynmanEvaluation(
   state: DebateState,
   result: {
     understood: boolean;
+    question: string;
     focus?: string;
     checkpoints?: FeynmanCheckpoint[];
   },
 ): DebateState {
-  if (result.understood) {
-    return completeFeynmanState(
-      state,
-      result.focus ?? "",
-      result.checkpoints,
-    );
-  }
+  const text = result.understood
+    ? result.focus
+      ? `我已经理解：${result.focus}`
+      : "我已经理解这个概念了。"
+    : result.question;
+
   return {
     ...withFeynmanCheckpoints(state, result.checkpoints),
-    phase: "completed",
-    pendingQuestion: undefined,
+    phase: "cross_examination",
+    pendingQuestion: result.understood ? undefined : result.question,
     turns: [
       ...state.turns,
       {
-        id: `feynman_round_limit_${Date.now()}`,
+        id: `feynman_learner_${Date.now()}`,
         role: "opponent",
         round: state.currentRound,
-        text: "本次讲解已达到 6 轮，先结束追问并进入复盘。",
+        text,
         createdAt: new Date().toISOString(),
       },
     ],

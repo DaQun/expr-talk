@@ -36,7 +36,10 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
 function formatTime(iso: string): string {
   const time = Date.parse(iso);
   if (!Number.isFinite(time)) return iso;
-  return new Date(time).toLocaleString(undefined, {
+  const date = new Date(time);
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleString(undefined, {
+    ...(sameYear ? {} : { year: "numeric" as const }),
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -278,13 +281,11 @@ export function HistoryPage() {
         <div className="flex flex-col gap-2">
           {items.map((session) => {
             const statusLabel = STATUS_LABELS[session.status as SessionStatus] ?? session.status;
-            const side = session.comparison
+            const comparisonBadge = session.comparison
               ? session.comparison.improved
-                ? { variant: "success" as const, text: "复练有进步" }
-                : { variant: "warning" as const, text: "复练对比" }
-              : session.metrics
-                ? { variant: "default" as const, text: `填充词 ${session.metrics.fillerCount}` }
-                : { variant: "secondary" as const, text: "无指标" };
+                ? { variant: "success" as const, text: "有进步" }
+                : { variant: "warning" as const, text: "再练一轮" }
+              : null;
             return (
               <div key={session.id} className={cn("bg-card group flex min-w-0 items-stretch rounded-lg border border-border transition-all hover:-translate-y-px")}>
                 <Link
@@ -300,7 +301,18 @@ export function HistoryPage() {
                       <span>{formatTime(session.startedAt)}</span>
                     </div>
                   </div>
-                  <Badge variant={side.variant} className="shrink-0">{side.text}</Badge>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    {comparisonBadge && (
+                      <Badge variant={comparisonBadge.variant}>
+                        {comparisonBadge.text}
+                      </Badge>
+                    )}
+                    {session.metrics && (
+                      <span className="text-muted-foreground text-xs tabular-nums">
+                        填充词 {session.metrics.fillerCount}
+                      </span>
+                    )}
+                  </div>
                 </Link>
                 <div className="flex items-center border-l border-border px-2">
                   <Button

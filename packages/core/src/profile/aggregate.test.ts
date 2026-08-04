@@ -93,4 +93,24 @@ describe("buildUserProfile", () => {
     assert.equal(profile.interruptedSessionCount, 1);
     assert.equal(profile.totalDurationSec, 60);
   });
+
+  it("groups legacy model issue aliases into one recurring issue", () => {
+    const first = session(0);
+    const second = session(1);
+    first.report!.topIssues[0] = {
+      code: "FILLER_ABUSE" as never,
+      title: "填充词和无效内容过多",
+      severity: "high",
+    };
+    second.report!.topIssues[0] = {
+      code: "filler_words" as never,
+      title: "填充语过多",
+      severity: "medium",
+    };
+
+    const profile = buildUserProfile([first, second]);
+
+    assert.equal(profile.recurringIssues[0]?.code, "too_many_fillers");
+    assert.equal(profile.recurringIssues[0]?.count, 2);
+  });
 });

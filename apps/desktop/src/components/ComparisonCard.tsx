@@ -1,5 +1,6 @@
 import {
   ISSUE_CODE_LABELS,
+  normalizeIssueCode,
   type AttemptComparison,
 } from "@expr-talk/shared";
 import { Link } from "react-router-dom";
@@ -16,6 +17,7 @@ import { cn } from "@/lib/utils";
 
 type Props = {
   comparison: AttemptComparison;
+  paceRange?: [number, number];
 };
 
 const DIMENSION_LABELS = {
@@ -34,6 +36,7 @@ function Delta({
   betterWhen,
   beforeNumeric,
   afterNumeric,
+  targetRange = [160, 280],
 }: {
   label: string;
   before: number | string;
@@ -42,9 +45,15 @@ function Delta({
   betterWhen: "lower" | "higher" | "target-range";
   beforeNumeric?: number;
   afterNumeric?: number;
+  targetRange?: [number, number];
 }) {
+  const [rangeMin, rangeMax] = targetRange;
   const paceDistance = (value: number) =>
-    value < 160 ? 160 - value : value > 280 ? value - 280 : 0;
+    value < rangeMin
+      ? rangeMin - value
+      : value > rangeMax
+        ? value - rangeMax
+        : 0;
   const good = betterWhen === "target-range"
     ? beforeNumeric == null || afterNumeric == null
       ? null
@@ -56,7 +65,8 @@ function Delta({
       : betterWhen === "lower"
         ? delta < 0
         : delta > 0;
-  const sign = delta > 0 ? `+${delta}` : `${delta}`;
+  const value = Number.isInteger(delta) ? String(delta) : delta.toFixed(1);
+  const sign = delta > 0 ? `+${value}` : value;
 
   return (
     <div className="bg-background flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
@@ -80,9 +90,13 @@ function Delta({
   );
 }
 
-export function ComparisonCard({ comparison }: Props) {
+export function ComparisonCard({
+  comparison,
+  paceRange = [160, 280],
+}: Props) {
   const { before, after, deltas } = comparison;
   const targetDimension = deltas.targetDimension;
+  const normalizedTargetIssue = normalizeIssueCode(comparison.targetIssue);
   const beforeTargetScore = targetDimension
     ? before.dimensionScores?.[targetDimension]
     : undefined;
@@ -96,17 +110,29 @@ export function ComparisonCard({ comparison }: Props) {
         <CardTitle className="text-base">
           复练对比 · 第 {comparison.round} 轮
         </CardTitle>
-        <Badge variant={comparison.improved ? "success" : "warning"}>
-          {comparison.improved ? "有进步" : "再练一轮"}
+        <Badge
+          variant={
+            comparison.conclusive === false
+              ? "secondary"
+              : comparison.improved
+                ? "success"
+                : "warning"
+          }
+        >
+          {comparison.conclusive === false
+            ? "结果不确定"
+            : comparison.improved
+              ? "有进步"
+              : "未明显提升"}
         </Badge>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {comparison.targetIssue ? (
           <p className="text-muted-foreground m-0 text-sm">
             本轮目标：
-            {ISSUE_CODE_LABELS[
-              comparison.targetIssue as keyof typeof ISSUE_CODE_LABELS
-            ] ?? comparison.targetIssue}
+            {normalizedTargetIssue
+              ? ISSUE_CODE_LABELS[normalizedTargetIssue]
+              : comparison.targetIssue}
           </p>
         ) : null}
 
@@ -124,24 +150,24 @@ export function ComparisonCard({ comparison }: Props) {
               />
             )}
           <Delta
-            label="填充词"
-            before={before.fillerCount}
-            after={after.fillerCount}
-            delta={deltas.fillerDelta}
+            label={deltas.fillerRateDelta != null ? "填充词/百字" : "填充词"}
+            before={before.fillerRate?.toFixed(1) ?? before.fillerCount}
+            after={after.fillerRate?.toFixed(1) ?? after.fillerCount}
+            delta={deltas.fillerRateDelta ?? deltas.fillerDelta}
             betterWhen="lower"
           />
           <Delta
-            label="犹豫词"
-            before={before.hedgeCount}
-            after={after.hedgeCount}
-            delta={deltas.hedgeDelta}
+            label={deltas.hedgeRateDelta != null ? "犹豫词/百字" : "犹豫词"}
+            before={before.hedgeRate?.toFixed(1) ?? before.hedgeCount}
+            after={after.hedgeRate?.toFixed(1) ?? after.hedgeCount}
+            delta={deltas.hedgeRateDelta ?? deltas.hedgeDelta}
             betterWhen="lower"
           />
           <Delta
-            label="模糊词"
-            before={before.vagueWordCount}
-            after={after.vagueWordCount}
-            delta={deltas.vagueDelta}
+            label={deltas.vagueRateDelta != null ? "模糊词/百字" : "模糊词"}
+            before={before.vagueRate?.toFixed(1) ?? before.vagueWordCount}
+            after={after.vagueRate?.toFixed(1) ?? after.vagueWordCount}
+            delta={deltas.vagueRateDelta ?? deltas.vagueDelta}
             betterWhen="lower"
           />
           <Delta
@@ -162,6 +188,7 @@ export function ComparisonCard({ comparison }: Props) {
                 betterWhen="target-range"
                 beforeNumeric={before.wordsPerMinute}
                 afterNumeric={after.wordsPerMinute}
+                targetRange={paceRange}
               />
             )}
           {before.clarity != null &&

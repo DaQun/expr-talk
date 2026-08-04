@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useSessionStore } from "@/state/sessionStore";
+import appIcon from "@/assets/app-icon.svg";
 
 const links = [
   { to: "/", label: "首页", end: true, icon: Home },
@@ -71,12 +72,12 @@ export function Layout() {
               sidebarCollapsed && "md:justify-center",
             )}
           >
-            <div
-              className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-md text-sm font-bold"
+            <img
+              src={appIcon}
+              alt=""
+              className="size-8 shrink-0"
               aria-hidden
-            >
-              E
-            </div>
+            />
             <div className={cn("min-w-0", sidebarCollapsed && "md:hidden")}>
               <div className="text-[0.95rem] font-semibold tracking-tight">
                 ExprTalk

@@ -115,7 +115,7 @@ export function PracticePage() {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [topicCategory, setTopicCategory] = useState("全部");
   const [topicId, setTopicId] = useState<string | null>(null);
-  const [inputMode, setInputMode] = useState<InputMode>("text");
+  const [inputMode, setInputMode] = useState<InputMode>("voice");
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const transcriptAutoFollowRef = useRef(true);
   const topicInputRef = useRef<HTMLTextAreaElement>(null);
@@ -125,6 +125,13 @@ export function PracticePage() {
   const interactiveMode = debateMode || feynmanMode;
   const debateWaiting = interactiveMode && current?.status === "debating";
   const sessionActive = recording || debateWaiting;
+  const debateSessionStarted =
+    debateMode &&
+    current?.mode === "debate" &&
+    Boolean(current.debate) &&
+    (recording || debateWaiting || analyzing || current.status === "analyzing");
+  const activeDebateTopic =
+    (debateSessionStarted ? current?.topic : draftTopic)?.trim() ?? "";
   /** 辩论会话一旦开始（录音/等待回应/分析中）即锁定输入方式，中途不能切换。 */
   const inputLocked = sessionActive || analyzing;
   const canAbandon =
@@ -388,7 +395,7 @@ export function PracticePage() {
                 {debateMode
                   ? "立论结束后，模型会提出反方质询"
                   : feynmanMode
-                    ? "讲解后，小白会追问直到确认理解"
+                    ? "小白会追问或反馈理解，结束由你决定"
                     : "说完后停止，自动进入复盘"}
               </span>
             </>
@@ -610,14 +617,16 @@ export function PracticePage() {
                   复练第 {current.round ?? "?"} 轮
                 </Badge>
               )}
-              {modelStatus && (
+              {recording && modelStatus && (
                 <Badge variant={modelStatus.ready ? "success" : "warning"}>
                   ASR {modelStatus.ready ? "就绪" : "未就绪"}
                 </Badge>
               )}
-              <Badge variant={llmReady ? "success" : "warning"}>
-                LLM {llmReady ? "已配置" : "未就绪"}
-              </Badge>
+              {recording && (
+                <Badge variant={llmReady ? "success" : "warning"}>
+                  LLM {llmReady ? "已配置" : "未就绪"}
+                </Badge>
+              )}
             </div>
 
             <div className="bg-muted/50 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-lg border border-border px-3.5 py-2.5">
@@ -628,6 +637,18 @@ export function PracticePage() {
                 评分侧重：{modeRubricLine}
               </p>
             </div>
+
+            {debateSessionStarted && activeDebateTopic && (
+              <section
+                className="border-primary/20 bg-primary/6 rounded-lg border px-3.5 py-3"
+                aria-label="当前辩题"
+              >
+                <div className="text-primary mb-1 text-xs font-medium">当前辩题</div>
+                <p className="m-0 text-sm leading-relaxed whitespace-pre-wrap">
+                  {activeDebateTopic}
+                </p>
+              </section>
+            )}
 
             {debateMode && current?.debate && current.debate.turns.length > 0 && (
               <div className="bg-background max-h-64 overflow-y-auto rounded-lg border border-border p-3.5">
@@ -683,28 +704,29 @@ export function PracticePage() {
               </Button>
             )}
 
-            <div className="grid gap-3 lg:grid-cols-[minmax(180px,0.65fr)_minmax(0,1.35fr)]">
-              <div className="space-y-1.5">
-                <Label htmlFor="mode">训练模式</Label>
-                <Select
-                  value={draftMode}
-                  onValueChange={(v) => setDraftMode(v as PracticeMode)}
-                  disabled={sessionActive}
-                >
-                  <SelectTrigger id="mode" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent position="popper">
-                    {PRACTICE_MODES.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {PRACTICE_MODE_LABELS[m]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            {(!debateMode || !debateSessionStarted) && (
+              <div className="grid gap-3 lg:grid-cols-[minmax(180px,0.65fr)_minmax(0,1.35fr)]">
+                <div className="space-y-1.5">
+                  <Label htmlFor="mode">训练模式</Label>
+                  <Select
+                    value={draftMode}
+                    onValueChange={(v) => setDraftMode(v as PracticeMode)}
+                    disabled={sessionActive}
+                  >
+                    <SelectTrigger id="mode" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent position="popper">
+                      {PRACTICE_MODES.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {PRACTICE_MODE_LABELS[m]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div className="space-y-1.5">
+                <div className="space-y-1.5">
                   <div className="flex flex-wrap items-end gap-2">
                     <div className="min-w-[8rem] flex-1 space-y-2">
                       <Label htmlFor="topic-cat">
@@ -784,24 +806,25 @@ export function PracticePage() {
                       换一题
                     </Button>
                   </div>
-              </div>
+                </div>
 
-              <div className="space-y-1.5 lg:col-span-2">
-                <Label htmlFor="topic">题目（可改）</Label>
-                <Textarea
-                  id="topic"
-                  ref={topicInputRef}
-                  value={draftTopic}
-                  onChange={(e) => {
-                    setDraftTopic(e.target.value);
-                    setTopicId(null);
-                  }}
-                  disabled={sessionActive}
-                  rows={2}
-                  className="min-h-20"
-                />
+                <div className="space-y-1.5 lg:col-span-2">
+                  <Label htmlFor="topic">题目（可改）</Label>
+                  <Textarea
+                    id="topic"
+                    ref={topicInputRef}
+                    value={draftTopic}
+                    onChange={(e) => {
+                      setDraftTopic(e.target.value);
+                      setTopicId(null);
+                    }}
+                    disabled={sessionActive}
+                    rows={2}
+                    className="min-h-20"
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {debateMode ? (
               <div className="border-border bg-muted/30 rounded-lg border p-3.5">
@@ -818,11 +841,11 @@ export function PracticePage() {
                     disabled={inputLocked}
                     aria-label="辩论输入方式"
                   >
-                    <ToggleGroupItem value="text" aria-label="文字输入">
-                      <Keyboard data-icon="inline-start" /> 文字
-                    </ToggleGroupItem>
                     <ToggleGroupItem value="voice" aria-label="语音输入">
                       <Mic data-icon="inline-start" /> 语音
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="text" aria-label="文字输入">
+                      <Keyboard data-icon="inline-start" /> 文字
                     </ToggleGroupItem>
                   </ToggleGroup>
                 </div>

@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { TrainingSession } from "@expr-talk/shared";
 import {
-  finishFeynmanEvaluation,
+  applyFeynmanEvaluation,
   formatDebateTranscript,
   initialDebateState,
   matchesActiveRecording,
   recordingIdsForSession,
-  shouldFinishFeynmanRound,
   withoutSessionRecordings,
 } from "./sessionLifecycle";
 
@@ -43,11 +42,25 @@ test("formats role-aware interactive transcripts", () => {
   );
 });
 
-test("ends Feynman sessions when understood or at the round limit", () => {
-  assert.equal(shouldFinishFeynmanRound(feynmanSession(2), { understood: true }), true);
-  assert.equal(shouldFinishFeynmanRound(feynmanSession(6), { understood: false }), true);
-  const completed = finishFeynmanEvaluation(feynmanSession(6).debate!, { understood: false });
-  assert.equal(completed.phase, "completed");
+test("keeps Feynman sessions open after understanding and beyond six rounds", () => {
+  const understood = applyFeynmanEvaluation(feynmanSession(6).debate!, {
+    understood: true,
+    question: "",
+    focus: "复利会让本金和收益一起参与下一轮计算",
+  });
+  assert.equal(understood.phase, "cross_examination");
+  assert.equal(understood.pendingQuestion, undefined);
+  assert.equal(
+    understood.turns[understood.turns.length - 1]?.text,
+    "我已经理解：复利会让本金和收益一起参与下一轮计算",
+  );
+
+  const questioning = applyFeynmanEvaluation(feynmanSession(12).debate!, {
+    understood: false,
+    question: "这个规律在什么情况下不适用？",
+  });
+  assert.equal(questioning.phase, "cross_examination");
+  assert.equal(questioning.pendingQuestion, "这个规律在什么情况下不适用？");
 });
 
 test("removes all persisted recording references", () => {

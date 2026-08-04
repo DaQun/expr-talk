@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   CheckCircle2,
   ChevronDown,
@@ -14,6 +15,8 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   ISSUE_CODE_LABELS,
   SCORE_DIMENSION_LABELS,
+  normalizeIssueCode,
+  type AttemptComparison,
   type DimensionReview,
   type EvaluationDimensionKey,
   type ScoreDimension,
@@ -25,6 +28,7 @@ import {
   GuidancePanel,
 } from "@/components/GuidancePanel";
 import { audioApi } from "@/ipc/audio";
+import { api } from "@/ipc/client";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -48,13 +52,92 @@ const DIMENSION_ORDER = Object.keys(
 ) as EvaluationDimensionKey[];
 
 const SOURCE_LABELS: Record<DimensionReview["source"], string> = {
-  llm: "综合判断",
-  objective: "客观计算",
-  mixed: "综合 + 客观",
+  llm: "大模型判断",
+  objective: "历史报告标签",
+  mixed: "大模型判断（参考本地指标）",
 };
 
 function issueLabel(code: string): string {
-  return ISSUE_CODE_LABELS[code as keyof typeof ISSUE_CODE_LABELS] ?? code;
+  const normalized = normalizeIssueCode(code);
+  return normalized ? ISSUE_CODE_LABELS[normalized] : code;
+}
+
+type TranscriptSegment = { text: string; mark: number };
+
+function highlightTranscript(
+  text: string,
+  originals: string[],
+): TranscriptSegment[] {
+  const matches: Array<{ start: number; end: number; mark: number }> = [];
+  originals.forEach((original, mark) => {
+    const needle = original.trim();
+    if (needle.length < 4) return;
+    const start = text.indexOf(needle);
+    if (start < 0) return;
+    const end = start + needle.length;
+    if (matches.some((m) => start < m.end && end > m.start)) return;
+    matches.push({ start, end, mark });
+  });
+  matches.sort((a, b) => a.start - b.start);
+  const segments: TranscriptSegment[] = [];
+  let cursor = 0;
+  for (const m of matches) {
+    if (m.start > cursor) {
+      segments.push({ text: text.slice(cursor, m.start), mark: -1 });
+    }
+    segments.push({ text: text.slice(m.start, m.end), mark: m.mark });
+    cursor = m.end;
+  }
+  if (cursor < text.length) segments.push({ text: text.slice(cursor), mark: -1 });
+  if (segments.length === 0) segments.push({ text, mark: -1 });
+  return segments;
+}
+
+type ComparisonHighlight = {
+  label: string;
+  delta: number;
+  good: boolean | null;
+};
+
+function buildComparisonHighlights(
+  cmp: AttemptComparison,
+  paceRange: [number, number],
+): ComparisonHighlight[] {
+  const items: ComparisonHighlight[] = [];
+  const target = cmp.deltas.targetDimension;
+  if (target && cmp.deltas.targetDimensionDelta != null) {
+    const delta = cmp.deltas.targetDimensionDelta;
+    items.push({
+      label: DIMENSION_LABELS[target],
+      delta,
+      good: delta === 0 ? null : delta > 0,
+    });
+  }
+  items.push({
+    label: cmp.deltas.fillerRateDelta != null ? "填充词/百字" : "填充词",
+    delta: cmp.deltas.fillerRateDelta ?? cmp.deltas.fillerDelta,
+    good:
+      (cmp.deltas.fillerRateDelta ?? cmp.deltas.fillerDelta) === 0
+        ? null
+        : (cmp.deltas.fillerRateDelta ?? cmp.deltas.fillerDelta) < 0,
+  });
+  if (
+    cmp.deltas.wpmDelta != null &&
+    cmp.before.wordsPerMinute != null &&
+    cmp.after.wordsPerMinute != null
+  ) {
+    const [min, max] = paceRange;
+    const distance = (value: number) =>
+      value < min ? min - value : value > max ? value - max : 0;
+    const before = distance(cmp.before.wordsPerMinute);
+    const after = distance(cmp.after.wordsPerMinute);
+    items.push({
+      label: "语速",
+      delta: cmp.deltas.wpmDelta,
+      good: before === after ? null : after < before,
+    });
+  }
+  return items.slice(0, 3);
 }
 
 function averageScores(
@@ -68,7 +151,7 @@ function averageScores(
   return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
-type SignalStatus = "正常" | "偏低" | "偏高" | "偏多" | "未评估";
+type SignalStatus = "正常" | "已记录" | "偏低" | "偏高" | "偏多" | "未评估";
 
 const PACE_RANGES: Record<string, [number, number]> = {
   free: [160, 240],
@@ -109,6 +192,9 @@ export function ReviewPage() {
   const [showTranscript, setShowTranscript] = useState(false);
   const [showAudio, setShowAudio] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [openDimension, setOpenDimension] = useState<
+    EvaluationDimensionKey | null | undefined
+  >(undefined);
   const analyzeElapsed = useElapsedSeconds(analyzing);
 
   useEffect(() => {
@@ -118,6 +204,18 @@ export function ReviewPage() {
   useEffect(() => {
     void refreshModelStatus();
   }, [refreshModelStatus]);
+
+  useEffect(() => {
+    setOpenDimension(undefined);
+  }, [current?.id]);
+
+  const profileQuery = useQuery({
+    queryKey: ["profile"],
+    queryFn: () => api.getProfile(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    enabled: Boolean(current && report),
+  });
 
   const hasTranscript = Boolean(current?.finalTranscript?.trim());
   const diskAudioPath = lastAudioPath || current?.audioFile || null;
@@ -154,6 +252,37 @@ export function ReviewPage() {
   const primaryIssue = report?.topIssues[0];
   const next = report?.nextPractice;
   const cmp = comparison ?? current?.comparison ?? null;
+  const currentPaceRange = PACE_RANGES[current?.mode ?? "free"] ?? PACE_RANGES.free;
+  const nextStepTitle = hasTranscript
+    ? (primaryIssue?.title ??
+      (next ? issueLabel(next.targetIssue) : "整体较稳，保持节奏"))
+    : "缺少逐字稿";
+  const nextStepSuggestion = hasTranscript
+    ? (primaryIssue?.suggestion ?? next?.instruction ?? report?.summary ?? "")
+    : "先解决录音或识别问题，生成逐字稿后才能给出可复练目标。";
+  const recurringIssue = primaryIssue
+    ? profileQuery.data?.recurringIssues.find(
+        (issue) =>
+          issue.code ===
+          normalizeIssueCode(
+            primaryIssue.code,
+            `${primaryIssue.title} ${primaryIssue.suggestion ?? ""}`,
+          ),
+      )
+    : undefined;
+  const reviewedSessionCount = profileQuery.data?.reviewedSessionCount;
+  const comparisonHighlights = cmp
+    ? buildComparisonHighlights(cmp, currentPaceRange)
+    : [];
+
+  function scrollToEvidence(index: number) {
+    if (index >= 3) setShowAllEvidence(true);
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById(`evidence-item-${index}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
 
   const emptyGuidance = useMemo(
     () =>
@@ -392,9 +521,11 @@ export function ReviewPage() {
   const lowestDimensionKey = dimensionItems
     .filter((item): item is typeof item & { score: number } => item.score != null)
     .sort((a, b) => a.score - b.score)[0]?.key;
+  const effectiveOpenDimension =
+    openDimension === undefined ? lowestDimensionKey : openDimension;
   const chars = Math.max(1, metrics?.totalChars ?? 0);
   const perHundredChars = (count: number) => ((count / chars) * 100).toFixed(1);
-  const modePaceRange = PACE_RANGES[current.mode] ?? PACE_RANGES.free;
+  const modePaceRange = currentPaceRange;
   const fillerRate = metrics ? (metrics.fillerCount / chars) * 100 : undefined;
   const repetitionPercent = metrics ? metrics.repetitionRate * 100 : undefined;
   const debateUserTurns = current.debate?.turns.filter(
@@ -431,7 +562,7 @@ export function ReviewPage() {
           value: measuredDurationSec
             ? `${Math.round(measuredDurationSec)} 秒`
             : "未记录",
-          status: measuredDurationSec ? "正常" as const : "未评估" as const,
+          status: measuredDurationSec ? "已记录" as const : "未评估" as const,
           detail: measuredDurationSec
             ? "是否达标见题目清单"
             : "粘贴文本无法推断口述时长",
@@ -501,6 +632,14 @@ export function ReviewPage() {
   const visibleEvidence = showAllEvidence
     ? evidenceItems
     : evidenceItems.slice(0, 3);
+  const transcriptText = current.finalTranscript ?? "";
+  const transcriptSegments =
+    showTranscript && transcriptText.trim()
+      ? highlightTranscript(
+          transcriptText,
+          evidenceItems.map((item) => item.original),
+        )
+      : null;
 
   return (
     <div>
@@ -530,6 +669,61 @@ export function ReviewPage() {
           )}
         </div>
 
+        {cmp && comparisonHighlights.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-card px-3.5 py-2.5 text-sm">
+            <Badge
+              variant={
+                cmp.conclusive === false
+                  ? "secondary"
+                  : cmp.improved
+                    ? "success"
+                    : "warning"
+              }
+            >
+              {cmp.conclusive === false
+                ? "结果不确定"
+                : cmp.improved
+                  ? "本轮有进步"
+                  : "未明显提升"}
+            </Badge>
+            <span className="text-muted-foreground text-xs">
+              对比第 {cmp.round - 1} 轮
+            </span>
+            {comparisonHighlights.map((highlight) => (
+              <span
+                key={highlight.label}
+                className="flex items-center gap-1 text-xs"
+              >
+                <span className="text-muted-foreground">
+                  {highlight.label}
+                </span>
+                <strong
+                  className={cn(
+                    "tabular-nums",
+                    highlight.good === true && "text-success",
+                    highlight.good === false && "text-destructive",
+                  )}
+                >
+                  {highlight.delta > 0
+                    ? `+${highlight.delta}`
+                    : highlight.delta}
+                </strong>
+              </span>
+            ))}
+            <button
+              type="button"
+              className="text-primary ml-auto text-xs hover:underline"
+              onClick={() =>
+                document
+                  .getElementById("comparison-detail")
+                  ?.scrollIntoView({ behavior: "smooth" })
+              }
+            >
+              查看对比详情
+            </button>
+          </div>
+        )}
+
         {report.analysisCoverage?.strategy === "sampled" && (
           <Alert>
             <AlertTitle>本次报告使用长文本抽样</AlertTitle>
@@ -543,19 +737,20 @@ export function ReviewPage() {
           <GuidancePanel title="本轮无法完成诊断" items={emptyGuidance} />
         )}
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
-                整体表现
-              </div>
-              <CardTitle className="text-lg">本轮总结</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed">
-                {report.summary}
-              </p>
-              {featuredScores.length > 0 && (
+        <div className="flex flex-col gap-4">
+        <Card className="order-2 lg:order-1">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">成绩概览</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed">
+              {report.summary}
+            </p>
+            {featuredScores.length > 0 && (
+              <div>
+                <div className="text-muted-foreground mb-2 text-xs font-semibold tracking-wider uppercase">
+                  大模型评分 · 按本轮场景侧重
+                </div>
                 <div className="grid grid-cols-3 divide-x divide-border overflow-hidden rounded-lg border border-border">
                   {featuredScores.map(([key, value], index) => (
                     <div key={key} className="min-w-0 px-3 py-2.5">
@@ -569,162 +764,215 @@ export function ReviewPage() {
                     </div>
                   ))}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="surface-hero border-primary/25">
-            <CardHeader className="pb-2">
-              <div className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
-                最优先改这一点
               </div>
-              <CardTitle className="text-lg">
-                {hasTranscript && primaryIssue
-                  ? primaryIssue.title
-                  : hasTranscript
-                    ? "整体较稳"
-                    : "缺少逐字稿"}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {primaryIssue?.evidence && hasTranscript && (
+            )}
+            {objectiveSignals.length > 0 && (
+              <div>
+                <div className="text-muted-foreground mb-2 text-xs font-semibold tracking-wider uppercase">
+                  客观口语指标 · 本地计算
+                </div>
+                <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3 lg:grid-cols-5">
+                  {objectiveSignals.map((signal) => (
+                    <div
+                      key={signal.label}
+                      className="min-w-0 bg-card px-3.5 py-3"
+                    >
+                      <div className="text-muted-foreground text-xs">
+                        {signal.label}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-baseline gap-1.5">
+                        <span className="text-base font-semibold tabular-nums">
+                          {signal.value}
+                        </span>
+                        <Badge
+                          variant={
+                            signal.status === "正常"
+                              ? "success"
+                              : signal.status === "未评估" ||
+                                  signal.status === "已记录"
+                                ? "secondary"
+                                : "warning"
+                          }
+                        >
+                          {signal.status}
+                        </Badge>
+                      </div>
+                      <div className="text-muted-foreground mt-1 text-xs leading-relaxed">
+                        {signal.detail}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="surface-hero order-1 border-primary/25 lg:order-2">
+          <CardHeader className="pb-2">
+            <div className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
+              下一步 · 只改这一点
+            </div>
+            <CardTitle className="text-lg">{nextStepTitle}</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.65fr)]">
+            <div className="flex flex-col gap-3">
+              {hasTranscript && primaryIssue?.evidence && (
                 <div className="border-primary/20 bg-background/70 rounded-lg border px-3.5 py-3 text-sm">
                   <span className="text-muted-foreground">判断依据：</span>
                   {primaryIssue.evidence}
                 </div>
               )}
               <p className="m-0 text-sm leading-relaxed">
-                {hasTranscript
-                  ? (primaryIssue?.suggestion ??
-                    next?.instruction ??
-                    report.summary)
-                  : "先解决录音或识别问题，生成逐字稿后才能给出可复练目标。"}
+                {nextStepSuggestion}
               </p>
-              <Button asChild className="w-fit">
+              {recurringIssue && recurringIssue.count >= 2 && (
+                <p className="border-warning/30 bg-warning/5 m-0 rounded-lg border px-3.5 py-2.5 text-xs leading-relaxed">
+                  这个问题已累计出现 {recurringIssue.count} 次
+                  {typeof reviewedSessionCount === "number" &&
+                  reviewedSessionCount > 0
+                    ? `（占有效练习 ${recurringIssue.sessionRate}%）`
+                    : ""}
+                  {recurringIssue.trend === "worsening"
+                    ? "，且近期仍在增加——值得优先解决。"
+                    : recurringIssue.trend === "improving"
+                      ? "，但正在改善，继续保持。"
+                      : "，值得优先解决。"}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-3">
+              {hasTranscript && next && (
+                <div className="bg-background/70 rounded-lg border border-border px-3.5 py-3 text-sm">
+                  <span className="text-muted-foreground">复练题目：</span>
+                  {next.retryPrompt}
+                </div>
+              )}
+              {hasTranscript && next && next.successCriteria.length > 0 && (
+                <div>
+                  <div className="text-muted-foreground text-xs font-medium">
+                    达标标准
+                  </div>
+                  <ul className="mt-2 mb-0 list-disc space-y-1.5 pl-5 text-sm">
+                    {next.successCriteria.slice(0, 3).map((criterion) => (
+                      <li key={criterion}>{criterion}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <Button asChild className="mt-auto w-fit">
                 <Link to={hasTranscript ? `/retry/${current.id}` : "/practice"}>
-                  {hasTranscript ? "围绕这一点再练一次" : "回练习页补救"}
+                  {hasTranscript ? "开始同题复练" : "回练习页补救"}
                 </Link>
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </CardContent>
+        </Card>
         </div>
 
         {dimensionItems.length > 0 && (
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <CardTitle className="text-lg">五维评测总览</CardTitle>
-                  <p className="text-muted-foreground mt-1 mb-0 text-sm">
-                    分数用于定位相对强弱，结论与证据用于决定怎么改。
-                  </p>
-                </div>
-                <Badge variant="outline">按本轮场景评估</Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="flex flex-col overflow-hidden rounded-lg border border-border">
-              {dimensionItems.map((item, index) => (
-                <details
-                  key={item.key}
-                  open={item.key === lowestDimensionKey}
-                  className={cn(
-                    "group min-w-0",
-                    index > 0 && "border-t border-border",
-                  )}
-                >
-                  <summary className="grid cursor-pointer list-none items-center gap-3 px-4 py-3.5 sm:grid-cols-[8rem_minmax(120px,1fr)_3rem_1.25rem]">
-                    <span className="text-sm font-medium">{item.label}</span>
-                    {item.score != null ? (
-                      <Progress value={item.score} className="h-1.5" />
-                    ) : null}
-                    <strong className="text-right text-lg tabular-nums">{item.score ?? "--"}</strong>
-                    <ChevronDown className="text-muted-foreground size-4 transition-transform group-open:rotate-180" />
-                  </summary>
-                  <div className="bg-muted/25 border-t border-border px-4 py-3 sm:pl-[9rem]">
-                    <p className="m-0 text-sm leading-relaxed">{item.verdict}</p>
-                    {item.evidence && (
-                      <p className="text-muted-foreground mt-2 mb-0 text-xs leading-relaxed">
-                        依据：{item.evidence}
-                      </p>
-                    )}
-                    <div className="text-muted-foreground mt-2 flex items-center gap-1 text-[0.7rem]">
-                      <Info className="size-3" />
-                      {item.legacy
-                        ? "旧报告推算"
-                        : SOURCE_LABELS[item.source]}
-                    </div>
-                  </div>
-                </details>
-              ))}
-            </CardContent>
-          </Card>
-        )}
-
-        {report.taskChecks && report.taskChecks.length > 0 && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg">题目完成情况</CardTitle>
-              <p className="text-muted-foreground m-0 text-sm">
-                逐项核对本轮题目与场景要求。
+              <CardTitle className="text-lg">诊断明细</CardTitle>
+              <p className="text-muted-foreground mt-1 mb-0 text-sm">
+                四维结论与题目清单；默认展开最弱一项，点击行切换。
               </p>
             </CardHeader>
-            <CardContent className="grid gap-2 md:grid-cols-2">
-              {report.taskChecks.map((check, index) => {
-                const Icon = check.status === "met"
-                  ? CheckCircle2
-                  : check.status === "partial"
-                    ? CircleAlert
-                    : XCircle;
+            <CardContent className="flex flex-col overflow-hidden rounded-lg border border-border">
+              {dimensionItems.map((item, index) => {
+                const isOpen = item.key === effectiveOpenDimension;
+                const checks =
+                  item.key === "scenario_task" ? report.taskChecks : undefined;
                 return (
-                  <div key={`${check.label}-${index}`} className="flex gap-3 rounded-lg border border-border px-3.5 py-3">
-                    <Icon className={cn(
-                      "mt-0.5 size-4 shrink-0",
-                      check.status === "met" && "text-success",
-                      check.status === "partial" && "text-warning",
-                      check.status === "missed" && "text-destructive",
-                    )} />
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium">{check.label}</div>
-                      {check.evidence && (
-                        <p className="text-muted-foreground mt-1 mb-0 text-xs leading-relaxed">{check.evidence}</p>
+                  <div
+                    key={item.key}
+                    className={cn(
+                      "min-w-0",
+                      index > 0 && "border-t border-border",
+                    )}
+                  >
+                    <button
+                      type="button"
+                      aria-expanded={isOpen}
+                      onClick={() => setOpenDimension(isOpen ? null : item.key)}
+                      className="grid w-full cursor-pointer items-center gap-3 px-4 py-3.5 text-left sm:grid-cols-[8rem_minmax(120px,1fr)_3rem_1.25rem]"
+                    >
+                      <span className="text-sm font-medium">{item.label}</span>
+                      {item.score != null ? (
+                        <Progress value={item.score} className="h-1.5" />
+                      ) : (
+                        <span />
                       )}
-                    </div>
+                      <strong className="text-right text-lg tabular-nums">
+                        {item.score ?? "--"}
+                      </strong>
+                      <ChevronDown
+                        className={cn(
+                          "text-muted-foreground size-4 transition-transform",
+                          isOpen && "rotate-180",
+                        )}
+                      />
+                    </button>
+                    {isOpen && (
+                      <div className="bg-muted/25 border-t border-border px-4 py-3 sm:pl-[9rem]">
+                        <p className="m-0 text-sm leading-relaxed">
+                          {item.verdict}
+                        </p>
+                        {item.evidence && (
+                          <p className="text-muted-foreground mt-2 mb-0 text-xs leading-relaxed">
+                            依据：{item.evidence}
+                          </p>
+                        )}
+                        {checks && checks.length > 0 && (
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {checks.map((check, checkIndex) => {
+                              const Icon =
+                                check.status === "met"
+                                  ? CheckCircle2
+                                  : check.status === "partial"
+                                    ? CircleAlert
+                                    : XCircle;
+                              return (
+                                <div
+                                  key={`${check.label}-${checkIndex}`}
+                                  className="bg-background flex gap-3 rounded-lg border border-border px-3.5 py-3"
+                                >
+                                  <Icon
+                                    className={cn(
+                                      "mt-0.5 size-4 shrink-0",
+                                      check.status === "met" && "text-success",
+                                      check.status === "partial" &&
+                                        "text-warning",
+                                      check.status === "missed" &&
+                                        "text-destructive",
+                                    )}
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-medium">
+                                      {check.label}
+                                    </div>
+                                    {check.evidence && (
+                                      <p className="text-muted-foreground mt-1 mb-0 text-xs leading-relaxed">
+                                        {check.evidence}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <div className="text-muted-foreground mt-2 flex items-center gap-1 text-[0.7rem]">
+                          <Info className="size-3" />
+                          {item.legacy
+                            ? "旧报告推算"
+                            : SOURCE_LABELS[item.source]}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
-            </CardContent>
-          </Card>
-        )}
-
-        {objectiveSignals.length > 0 && (
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="text-base">客观口语指标</CardTitle>
-                <Badge variant="outline">本地计算</Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 overflow-hidden rounded-lg border border-border sm:grid-cols-3 lg:grid-cols-5">
-              {objectiveSignals.map((signal, index) => (
-                <div key={signal.label} className={cn("min-w-0 px-3.5 py-3", index > 0 && "border-l border-border")}>
-                  <div className="text-muted-foreground text-xs">{signal.label}</div>
-                  <div className="mt-1 flex flex-wrap items-baseline gap-1.5">
-                    <span className="text-base font-semibold tabular-nums">{signal.value}</span>
-                    <Badge
-                      variant={
-                        signal.status === "正常"
-                          ? "success"
-                          : signal.status === "未评估"
-                            ? "secondary"
-                            : "warning"
-                      }
-                    >
-                      {signal.status}
-                    </Badge>
-                  </div>
-                  {signal.detail && <div className="text-muted-foreground mt-0.5 text-xs">{signal.detail}</div>}
-                </div>
-              ))}
             </CardContent>
           </Card>
         )}
@@ -783,7 +1031,8 @@ export function ReviewPage() {
               {visibleEvidence.map((item, index) => (
                 <div
                   key={`${item.original}-${index}`}
-                  className="grid gap-3 rounded-lg border border-border px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+                  id={`evidence-item-${index}`}
+                  className="grid scroll-mt-6 gap-3 rounded-lg border border-border px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
                 >
                   <div className="min-w-0">
                     <div className="text-muted-foreground text-xs font-medium">
@@ -833,45 +1082,6 @@ export function ReviewPage() {
                     : `查看其余 ${evidenceItems.length - 3} 条`}
                 </Button>
               )}
-            </CardContent>
-          </Card>
-        )}
-
-        {next && hasTranscript && (
-          <Card className="border-primary/20">
-            <CardHeader className="pb-2">
-              <div className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
-                下一轮练习
-              </div>
-              <CardTitle className="text-lg">{issueLabel(next.targetIssue)}</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.65fr)]">
-              <div>
-                <p className="m-0 text-sm leading-relaxed">
-                  {next.instruction}
-                </p>
-                <div className="bg-muted/40 mt-3 rounded-lg border border-border px-3.5 py-3 text-sm">
-                  <span className="text-muted-foreground">复练题目：</span>
-                  {next.retryPrompt}
-                </div>
-              </div>
-              <div className="flex flex-col gap-3">
-                {next.successCriteria.length > 0 && (
-                  <div>
-                    <div className="text-muted-foreground text-xs font-medium">
-                      达标标准
-                    </div>
-                    <ul className="mt-2 mb-0 list-disc space-y-1.5 pl-5 text-sm">
-                      {next.successCriteria.slice(0, 3).map((criterion) => (
-                        <li key={criterion}>{criterion}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                <Button asChild className="w-fit">
-                  <Link to={`/retry/${current.id}`}>开始同题复练</Link>
-                </Button>
-              </div>
             </CardContent>
           </Card>
         )}
@@ -972,9 +1182,30 @@ export function ReviewPage() {
                     最终逐字稿
                   </h3>
                   {hasTranscript ? (
-                    <p className="m-0 whitespace-pre-wrap leading-relaxed">
-                      {current.finalTranscript}
-                    </p>
+                    <>
+                      {transcriptSegments?.some((seg) => seg.mark >= 0) && (
+                        <p className="text-muted-foreground mt-0 mb-3 text-xs">
+                          标黄句子有对应改写建议，点击可跳转。
+                        </p>
+                      )}
+                      <p className="m-0 whitespace-pre-wrap leading-relaxed">
+                        {(transcriptSegments ?? []).map((seg, segIndex) =>
+                          seg.mark < 0 ? (
+                            <span key={segIndex}>{seg.text}</span>
+                          ) : (
+                            <button
+                              key={segIndex}
+                              type="button"
+                              title="查看对应改写建议"
+                              onClick={() => scrollToEvidence(seg.mark)}
+                              className="decoration-warning/70 hover:bg-warning/35 cursor-pointer rounded-sm bg-warning/25 px-0.5 text-left underline decoration-2 underline-offset-2"
+                            >
+                              {seg.text}
+                            </button>
+                          ),
+                        )}
+                      </p>
+                    </>
                   ) : (
                     <p className="text-muted-foreground m-0">
                       无内容。可回练习页粘贴文本再分析。
@@ -1061,7 +1292,11 @@ export function ReviewPage() {
           )}
         </Card>
 
-        {cmp && <ComparisonCard comparison={cmp} />}
+        {cmp && (
+          <div id="comparison-detail" className="scroll-mt-6">
+            <ComparisonCard comparison={cmp} paceRange={modePaceRange} />
+          </div>
+        )}
 
         {error && (
           <div className="bg-destructive/10 text-destructive border-destructive/30 rounded-lg border px-3.5 py-3 text-sm">

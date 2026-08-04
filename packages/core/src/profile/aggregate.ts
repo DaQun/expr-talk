@@ -1,5 +1,6 @@
 import {
   SCORE_DIMENSION_LABELS,
+  normalizeIssueCode,
   normalizePracticeMode,
   type IssueCode,
   type PracticeMode,
@@ -26,7 +27,15 @@ function average(values: number[]): number | undefined {
 function issueMode(sessions: TrainingSession[], code: IssueCode): PracticeMode {
   const counts = new Map<PracticeMode, number>();
   for (const session of sessions) {
-    if (!session.report?.topIssues.some((issue) => issue.code === code))
+    if (
+      !session.report?.topIssues.some(
+        (issue) =>
+          normalizeIssueCode(
+            issue.code,
+            `${issue.title} ${issue.suggestion ?? ""}`,
+          ) === code,
+      )
+    )
       continue;
     const mode = normalizePracticeMode(session.mode);
     counts.set(mode, (counts.get(mode) ?? 0) + 1);
@@ -66,16 +75,20 @@ function buildIssues(sessions: TrainingSession[]): RecurringProfileIssue[] {
   for (const session of sessions) {
     const seen = new Set<IssueCode>();
     for (const issue of session.report?.topIssues ?? []) {
-      if (seen.has(issue.code)) continue;
-      seen.add(issue.code);
-      const current = issueMap.get(issue.code) ?? {
+      const code = normalizeIssueCode(
+        issue.code,
+        `${issue.title} ${issue.suggestion ?? ""}`,
+      );
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      const current = issueMap.get(code) ?? {
         title: issue.title,
         dates: [],
       };
       current.title = issue.title || current.title;
       current.dates.push(session.startedAt);
       current.suggestion = issue.suggestion || current.suggestion;
-      issueMap.set(issue.code, current);
+      issueMap.set(code, current);
     }
   }
   const midpoint = Math.floor(sessions.length / 2);
@@ -84,7 +97,13 @@ function buildIssues(sessions: TrainingSession[]): RecurringProfileIssue[] {
   return [...issueMap.entries()]
     .map(([code, item]) => {
       const sessionsWithIssue = sessions.filter((session) =>
-        session.report?.topIssues.some((issue) => issue.code === code),
+        session.report?.topIssues.some(
+          (issue) =>
+            normalizeIssueCode(
+              issue.code,
+              `${issue.title} ${issue.suggestion ?? ""}`,
+            ) === code,
+        ),
       );
       const earlyCount = sessionsWithIssue.filter((s) =>
         earlyIds.has(s.id),

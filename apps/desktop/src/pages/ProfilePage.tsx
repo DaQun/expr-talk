@@ -180,62 +180,43 @@ export function ProfilePage() {
         </p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">当前特点</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            {data.strength && (
-              <div className="rounded-lg border border-border px-4 py-3">
-                <div className="text-muted-foreground text-xs">相对优势</div>
-                <div className="mt-1 flex items-baseline justify-between gap-3">
-                  <strong>{data.strength.label}</strong>
-                  <span className="text-success font-semibold tabular-nums">
-                    {data.strength.score}
-                  </span>
-                </div>
-              </div>
-            )}
-            {data.focus && (
-              <div className="border-warning/30 bg-warning/5 rounded-lg border px-4 py-3">
-                <div className="text-muted-foreground text-xs">当前主目标</div>
-                <strong className="mt-1 block">{data.focus.title}</strong>
-                {data.focus.suggestion && (
-                  <p className="text-muted-foreground mt-2 mb-0 text-sm leading-relaxed">
-                    {data.focus.suggestion}
-                  </p>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="border-primary/25">
-          <CardHeader>
-            <div className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
-              下一步训练
-            </div>
-            <CardTitle className="text-lg">
-              {data.focus?.title ?? "继续稳定输出"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
+      <Card className="border-primary/25">
+        <CardHeader>
+          <div className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
+            下一步训练
+          </div>
+          <CardTitle className="text-lg">
+            {data.focus?.title ?? "继续稳定输出"}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(240px,0.5fr)]">
+          <div className="flex flex-col gap-3">
             <p className="m-0 text-sm leading-relaxed">
               {data.focus?.suggestion ??
                 "继续完成一次练习，积累足够样本后会自动生成针对性目标。"}
             </p>
+            {data.strength && (
+              <div className="rounded-lg border border-border px-3.5 py-2.5 text-sm">
+                <span className="text-muted-foreground">相对优势：</span>
+                {data.strength.label}
+                <span className="text-success ml-2 font-semibold tabular-nums">
+                  {data.strength.score}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col items-start gap-3 md:items-end">
             {data.focus && (
-              <Badge variant="outline" className="w-fit">
+              <Badge variant="outline">
                 推荐模式：{PRACTICE_MODE_LABELS[data.focus.recommendedMode]}
               </Badge>
             )}
-            <Button className="w-fit" onClick={startFocusedPractice}>
+            <Button onClick={startFocusedPractice}>
               开始针对性练习 <ArrowRight />
             </Button>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {data.modeAbilities.length > 0 && (
         <Card>

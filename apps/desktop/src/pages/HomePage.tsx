@@ -146,6 +146,12 @@ export function HomePage() {
               </Badge>
             ))}
           </div>
+          <Button asChild className="mt-3 w-full">
+            <Link to="/practice">
+              开始练习
+              <ArrowRight className="size-4" />
+            </Link>
+          </Button>
         </div>
       </section>
     </div>

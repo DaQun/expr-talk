@@ -9,6 +9,8 @@ import {
   type DimensionReview,
   type EvaluationDimensionKey,
   type TaskCheck,
+  ISSUE_CODES,
+  normalizeIssueCode,
 } from "@expr-talk/shared";
 import { chatCompletion } from "./openai_compatible";
 import type { LLMRequestOptions } from "./types";
@@ -20,10 +22,10 @@ schema:
   "summary": string,
   "scores": { "clarity":0-100, "structure":0-100, "logic":0-100, "directness":0-100, "density":0-100, "rhythm":0-100, "persuasiveness":0-100, "actionability":0-100, "hook":0-100, "memorability":0-100 },
   "dimensionReviews": {
-    "content":{"score":0-100,"verdict":string,"evidence":string,"source":"llm"|"objective"|"mixed"},
-    "logic":{"score":0-100,"verdict":string,"evidence":string,"source":"llm"|"objective"|"mixed"},
-    "expression":{"score":0-100,"verdict":string,"evidence":string,"source":"llm"|"objective"|"mixed"},
-    "scenario_task":{"score":0-100,"verdict":string,"evidence":string,"source":"llm"|"objective"|"mixed"}
+    "content":{"score":0-100,"verdict":string,"evidence":string},
+    "logic":{"score":0-100,"verdict":string,"evidence":string},
+    "expression":{"score":0-100,"verdict":string,"evidence":string},
+    "scenario_task":{"score":0-100,"verdict":string,"evidence":string}
   },
   "taskChecks": [{"label":string,"status":"met"|"partial"|"missed","evidence"?:string}],
   "logicReview": { "thesis":string, "support":string, "coherence":string, "closure":string, "verdict":string },
@@ -37,7 +39,7 @@ schema:
 - scores 优先覆盖 input.rubric 里权重大的维度；无关维度可省略
 - dimensionReviews 必须输出 content、logic、expression、scenario_task 四项。content 评主题契合、信息价值与洞察；logic 评结构、衔接与论证闭环；expression 评文本可观察的流畅、完整、准确与节奏；scenario_task 评 input.topic 中显式要求和模式目标的完成度
 - 不输出 voice 分数：当前没有音高、能量、真实停顿等声学分析结果，语音表现必须留给页面显示“未评估”
-- 每个 dimensionReview 必须给一句结论和一条可核对证据；source 仅用 llm/objective/mixed。仅有文本时不得声称评价了发音、音色、语调或真实停顿
+- 每个 dimensionReview 必须给一句结论和一条可核对证据。仅有文本时不得声称评价了发音、音色、语调或真实停顿
 - taskChecks 从题目中的显式要求提取 2-5 项逐项判断；没有明确要求时，按对应模式的基本任务要求判断。evidence 要简短具体
 - logic 必须评分，不得省略。structure 只评价内容组织和顺序；logic 单独评价：核心观点是否明确、论据是否真正支撑观点、因果/转折是否成立、前后是否矛盾、结论是否由前文推出
 - logicReview 必须从整篇逐字稿出发，不做逐句语病点评：thesis 写核心观点及是否明确；support 写论据与观点的支撑关系；coherence 写推理跳跃、矛盾或衔接；closure 写结论是否闭环；verdict 用一句话概括整条论证链
@@ -45,6 +47,7 @@ schema:
 - 辩论模式的 transcript 可能包含“我方”和“反方质询”标签：只评价我方发言，反方内容仅作为回应是否切题的上下文；summary 要概括整场多轮表现
 - 费曼学习法的 transcript 可能包含“讲解”和“小白提问”标签：只评价用户讲解；特别检查定义是否平实准确、因果或步骤是否讲清、例子和边界是否足以让初学者理解。小白确认理解表示本轮学习通过，不等于用户的表达没有改进空间
 - topIssues 排序要符合该模式最致命的问题（如口播优先钩子/密度，会议优先结论/可执行）
+- topIssues.code 和 nextPractice.targetIssue 只能使用以下固定编码之一：${ISSUE_CODES.join(", ")}。不得创造新编码、使用中文标题或 F0/F1 等临时编号
 - 每次 nextPractice 只聚焦 1 个主问题，instruction/retryPrompt 要贴合该模式
 - rewriteExamples 1-2 个，改写风格符合模式（口播更短更钩，会议更结论先行）
 - 用简体中文
@@ -157,7 +160,10 @@ export function parseStructuredReport(raw: string): StructuredReport {
           return {
             original: s.original,
             issues: Array.isArray(s.issues)
-              ? s.issues.filter((x): x is IssueCode => typeof x === "string")
+              ? s.issues.flatMap((issue) => {
+                  const code = normalizeIssueCode(issue, String(s.comment));
+                  return code ? [code] : [];
+                })
               : [],
             comment: s.comment,
             utteranceId:
@@ -188,7 +194,7 @@ export function parseStructuredReport(raw: string): StructuredReport {
         .filter((x): x is NonNullable<typeof x> => x != null)
     : [];
 
-  const nextPractice = parseNextPractice(obj.nextPractice);
+  const nextPractice = parseNextPractice(obj.nextPractice, topIssues[0]?.code);
 
   return {
     schemaVersion:
@@ -287,15 +293,11 @@ function parseDimensionReviews(
     ) {
       continue;
     }
-    const source =
-      review.source === "objective" || review.source === "mixed"
-        ? review.source
-        : "llm";
     reviews[key] = {
       score: Math.max(0, Math.min(100, Math.round(review.score))),
       verdict: review.verdict,
       evidence: review.evidence,
-      source,
+      source: "llm",
     };
   }
   // V3 compatibility: textual fluency must not be promoted to acoustic voice.
@@ -325,10 +327,7 @@ function parseDimensionReviewValue(value: unknown): DimensionReview | undefined 
     score: Math.max(0, Math.min(100, Math.round(review.score))),
     verdict: review.verdict,
     evidence: review.evidence,
-    source:
-      review.source === "objective" || review.source === "mixed"
-        ? review.source
-        : "llm",
+    source: "llm",
   };
 }
 
@@ -373,13 +372,15 @@ function parseLogicReview(item: unknown): StructuredReport["logicReview"] {
 function parseIssue(item: unknown): Issue | null {
   if (!item || typeof item !== "object") return null;
   const s = item as Record<string, unknown>;
-  if (typeof s.code !== "string" || typeof s.title !== "string") return null;
+  if (typeof s.title !== "string") return null;
+  const code = normalizeIssueCode(s.code, `${s.title} ${String(s.suggestion ?? "")}`);
+  if (!code) return null;
   const severity =
     s.severity === "high" || s.severity === "medium" || s.severity === "low"
       ? s.severity
       : "medium";
   return {
-    code: s.code as IssueCode,
+    code,
     title: s.title,
     severity,
     evidence: typeof s.evidence === "string" ? s.evidence : undefined,
@@ -387,20 +388,25 @@ function parseIssue(item: unknown): Issue | null {
   };
 }
 
-function parseNextPractice(item: unknown): NextPractice {
+function parseNextPractice(
+  item: unknown,
+  fallbackIssue?: IssueCode,
+): NextPractice {
   if (!item || typeof item !== "object") {
     return {
-      targetIssue: "unclear_structure",
+      targetIssue: fallbackIssue ?? "unclear_structure",
       instruction: "下一轮请结论先行，并补充 2 个具体论据。",
       retryPrompt: "请重新完整表达刚才的主题。",
       successCriteria: ["前 15 秒出现结论", "至少 2 个具体事实"],
     };
   }
   const s = item as Record<string, unknown>;
+  const targetIssue = normalizeIssueCode(
+    s.targetIssue,
+    `${String(s.instruction ?? "")} ${String(s.retryPrompt ?? "")}`,
+  );
   return {
-    targetIssue: (typeof s.targetIssue === "string"
-      ? s.targetIssue
-      : "unclear_structure") as IssueCode,
+    targetIssue: targetIssue ?? fallbackIssue ?? "unclear_structure",
     instruction:
       typeof s.instruction === "string"
         ? s.instruction

@@ -39,22 +39,33 @@ export type SentenceFeedback = {
   evidence?: string;
 };
 
-export type IssueCode =
-  | "late_conclusion"
-  | "too_many_fillers"
-  | "hedging"
-  | "vague_language"
-  | "repetition"
-  | "low_density"
-  | "long_pause"
-  | "unclear_structure"
-  | "weak_reasoning"
-  | "unsupported_claim"
-  | "logic_gap"
-  | "contradiction"
-  | "missing_conclusion"
-  | "missing_action"
-  | "weak_hook";
+export const ISSUE_CODES = [
+  "late_conclusion",
+  "too_many_fillers",
+  "hedging",
+  "vague_language",
+  "repetition",
+  "low_density",
+  "long_pause",
+  "unclear_structure",
+  "weak_reasoning",
+  "unsupported_claim",
+  "logic_gap",
+  "contradiction",
+  "missing_conclusion",
+  "missing_action",
+  "weak_hook",
+  "task_deviation",
+  "insufficient_duration",
+  "missing_thesis",
+  "missing_example",
+  "missing_definition",
+  "audience_mismatch",
+  "weak_response",
+  "long_sentence",
+] as const;
+
+export type IssueCode = (typeof ISSUE_CODES)[number];
 
 export const ISSUE_CODE_LABELS: Record<IssueCode, string> = {
   late_conclusion: "结论出现太晚",
@@ -72,7 +83,55 @@ export const ISSUE_CODE_LABELS: Record<IssueCode, string> = {
   missing_conclusion: "缺少明确结论",
   missing_action: "缺少行动指引",
   weak_hook: "开头吸引力不足",
+  task_deviation: "偏离题目要求",
+  insufficient_duration: "表达时长不足",
+  missing_thesis: "缺少明确观点",
+  missing_example: "缺少具体例子",
+  missing_definition: "关键概念解释不足",
+  audience_mismatch: "没有匹配听众认知",
+  weak_response: "回应质疑不充分",
+  long_sentence: "句子过长",
 };
+
+const ISSUE_CODE_SET = new Set<string>(ISSUE_CODES);
+
+const LEGACY_ISSUE_RULES: Array<[IssueCode, RegExp]> = [
+  ["insufficient_duration", /duration|length_insufficient|时长|时间不足/],
+  ["weak_hook", /weak_hook|missing_hook|hook|钩子|开头.{0,4}吸引/],
+  ["missing_action", /missing_action|call_to_action|\bcta\b|行动号召|行动指引/],
+  ["task_deviation", /off_topic|task_(deviation|mismatch)|missed_task|no_content|topic_deviation|偏离|跑题|未完成题目|违背.*要求|拒绝回答/],
+  ["missing_thesis", /no_(thesis|stance|opinion|personal_stance)|missing_thesis|weak_thesis|观点不明确|立场不明确|缺乏.{0,4}(观点|立场|主题)|没有.{0,4}(观点|立场)/],
+  ["missing_example", /(missing|no|lack|absent).{0,2}example|example_(missing|absent)|缺少.{0,4}例|没有.{0,4}例/],
+  ["missing_definition", /(missing|no|lack).{0,2}definition|definition_(absent|missing)|boundary_omitted|缺少.{0,6}(定义|解释|机制)|未.{0,4}(定义|解释)/],
+  ["audience_mismatch", /audience|听众|初学者|小白/],
+  ["weak_response", /weak_response|poor_response|no_rebuttal|回应.{0,4}(不足|薄弱|无效)|未.{0,4}回应|反驳不足/],
+  ["too_many_fillers", /filler|填充词|填充语|口头禅/],
+  ["hedging", /hedg|犹豫|不够坚定/],
+  ["vague_language", /vague|含糊|模糊|directness|不够直接/],
+  ["repetition", /repeat|repetition|重复/],
+  ["low_density", /low_density|density|信息密度|内容空洞/],
+  ["long_pause", /pause|停顿/],
+  ["late_conclusion", /late_conclusion|结论.{0,4}(太晚|滞后)/],
+  ["missing_conclusion", /missing_conclusion|no_conclusion|缺少.{0,4}(结论|结尾)|没有.{0,4}(结论|总结)/],
+  ["contradiction", /contradiction|矛盾|前后不一/],
+  ["logic_gap", /logic_(gap|jump)|causality|推理.{0,4}(跳跃|断层)|因果.{0,4}(跳跃|不清)/],
+  ["unsupported_claim", /unsupported|missing_arguments|论据|缺少.{0,4}(理由|支撑|证据)/],
+  ["weak_reasoning", /weak_reasoning|logic_circular|论证.{0,4}(较弱|薄弱|循环)/],
+  ["unclear_structure", /structure|flow|结构|层次|主线/],
+  ["long_sentence", /run_on|long_sentence|句子.{0,4}(过长|冗长)/],
+];
+
+/** 将模型和历史报告中的自由编码收敛到稳定的问题分类。 */
+export function normalizeIssueCode(
+  value: unknown,
+  context = "",
+): IssueCode | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (ISSUE_CODE_SET.has(normalized)) return normalized as IssueCode;
+  const searchable = `${normalized} ${context.toLowerCase()}`;
+  return LEGACY_ISSUE_RULES.find(([, pattern]) => pattern.test(searchable))?.[0];
+}
 
 export type Issue = {
   code: IssueCode;
