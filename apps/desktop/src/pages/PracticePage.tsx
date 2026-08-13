@@ -46,6 +46,7 @@ import { cn } from "@/lib/utils";
 import { Keyboard, Mic } from "lucide-react";
 import { useElapsedSeconds } from "@/hooks/useElapsedSeconds";
 import { FeynmanWorkbench } from "@/components/FeynmanWorkbench";
+import { DebateWorkbench } from "@/components/DebateWorkbench";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useSettingsStore } from "@/state/settingsStore";
 import { resolveLlmConfig } from "@/services/llmReadiness";
@@ -64,6 +65,7 @@ export function PracticePage() {
     error,
     analyzeNote,
     streamedQuestion,
+    streamedReasoning,
     level,
     liveSegments,
     partialText,
@@ -515,32 +517,31 @@ export function PracticePage() {
         analyzeNote={analyzeNote}
         analyzeElapsed={analyzeElapsed}
         streamedQuestion={streamedQuestion}
+        streamedReasoning={streamedReasoning}
         pasteText={pasteText}
         learnerRole={feynmanLearnerRole}
         difficulty={feynmanDifficulty}
         modelReady={modelStatus?.ready ?? null}
         llmReady={llmReady}
-        recorderPanel={recorderPanel}
+        llmReason={llmReadiness.ok ? undefined : llmReadiness.reason}
+        recordingUi={{
+          seconds,
+          levelPct,
+          asrStatus,
+          finalSegments: finalSegs,
+          partialText,
+          onStop: () => {
+            void (async () => {
+              const shouldReview = await stopAndAnalyze();
+              const id = useSessionStore.getState().current?.id;
+              if (shouldReview) {
+                navigate(id ? `/review/${id}` : "/review");
+              }
+            })();
+          },
+          onRerecord: () => void rerecord(),
+        }}
         discardDialog={discardDialog}
-        guidance={
-          <div className="flex flex-col gap-3">
-            {!llmReady && (
-              <Alert variant="destructive">
-                <AlertTitle>开始练习前需要先完成大模型配置</AlertTitle>
-                <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-                  <span>{llmReadiness.reason}</span>
-                  <Button asChild size="sm" variant="outline">
-                    <Link to="/settings">前往设置</Link>
-                  </Button>
-                </AlertDescription>
-              </Alert>
-            )}
-            <GuidancePanel
-              title={recording ? "录音中提示" : "开始前检查"}
-              items={guidance.filter((item) => item.id !== "ready")}
-            />
-          </div>
-        }
         error={error}
         onModeChange={setDraftMode}
         onTopicCategoryChange={setTopicCategory}
@@ -562,6 +563,65 @@ export function PracticePage() {
           const id = useSessionStore.getState().current?.id;
           if (id) navigate(`/review/${id}`);
         }}
+      />
+    );
+  }
+
+  if (debateMode) {
+    return (
+      <DebateWorkbench
+        draftTopic={draftTopic}
+        draftMode={draftMode}
+        topicCategory={topicCategory}
+        topicCategories={topicCategories}
+        topicId={topicId}
+        topics={modeTopics}
+        current={current}
+        recording={recording}
+        waiting={debateWaiting}
+        analyzing={analyzing}
+        analyzeNote={analyzeNote}
+        analyzeElapsed={analyzeElapsed}
+        streamedQuestion={streamedQuestion}
+        streamedReasoning={streamedReasoning}
+        pasteText={pasteText}
+        modelReady={modelStatus?.ready ?? null}
+        llmReady={llmReady}
+        llmReason={llmReadiness.ok ? undefined : llmReadiness.reason}
+        recordingUi={{
+          seconds,
+          levelPct,
+          asrStatus,
+          finalSegments: finalSegs,
+          partialText,
+          onStop: () => {
+            void (async () => {
+              const shouldReview = await stopAndAnalyze();
+              const id = useSessionStore.getState().current?.id;
+              if (shouldReview) {
+                navigate(id ? `/review/${id}` : "/review");
+              }
+            })();
+          },
+          onRerecord: () => void rerecord(),
+        }}
+        discardDialog={discardDialog}
+        error={error}
+        modeRubricLine={modeRubricLine}
+        onModeChange={setDraftMode}
+        onTopicCategoryChange={setTopicCategory}
+        onTopicSelect={selectTopic}
+        onTopicChange={(topic) => {
+          setDraftTopic(topic);
+          setTopicId(null);
+        }}
+        onPasteTextChange={setPasteText}
+        onStartVoice={() => void createAndStart()}
+        onStartResponse={() => void startDebateResponse()}
+        onSubmitText={() => void handlePasteSubmit()}
+        onRetryQuestion={() => void requestDebateQuestion()}
+        onFinish={() => void finishDebateAndReview()}
+        onAbandon={() => setConfirmDiscard(true)}
       />
     );
   }

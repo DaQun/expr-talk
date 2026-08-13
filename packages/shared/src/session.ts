@@ -1,6 +1,11 @@
 import type { PracticeMode, TrainingGoal } from "./mode";
 import type { SessionMetrics } from "./metrics";
-import type { EvaluationDimensionKey, StructuredReport } from "./report";
+import type {
+  EvaluationDimensionKey,
+  StructuredReport,
+  TaskCheck,
+  TaskCheckStatus,
+} from "./report";
 import type { IssueCode, TranscriptSegment } from "./transcript";
 
 export type SessionStatus =
@@ -92,6 +97,79 @@ export type FeynmanCheckpoint = {
   evidence?: string;
 };
 
+export const FEYNMAN_CHECKPOINT_IDS: FeynmanCheckpointId[] = [
+  "definition",
+  "mechanism",
+  "example",
+  "boundary",
+];
+
+export const FEYNMAN_CHECKPOINT_LABELS: Record<FeynmanCheckpointId, string> = {
+  definition: "概念定义",
+  mechanism: "原理与因果",
+  example: "具体例子",
+  boundary: "边界与误解",
+};
+
+export function taskCheckStatusFromCheckpoint(
+  status: FeynmanCheckpointStatus,
+): TaskCheckStatus {
+  if (status === "understood") return "met";
+  if (status === "in_progress") return "partial";
+  return "missed";
+}
+
+export function taskChecksFromFeynmanCheckpoints(
+  checkpoints: FeynmanCheckpoint[],
+): TaskCheck[] {
+  const byId = new Map(checkpoints.map((checkpoint) => [checkpoint.id, checkpoint]));
+  return FEYNMAN_CHECKPOINT_IDS.map((id) => {
+    const checkpoint = byId.get(id);
+    const status = checkpoint?.status ?? "not_started";
+    return {
+      label: FEYNMAN_CHECKPOINT_LABELS[id],
+      status: taskCheckStatusFromCheckpoint(status),
+      evidence: checkpoint?.evidence,
+    };
+  });
+}
+
+/** understood=1、进行中=0.4、未开始=0，四项平均后映射到 0–100。 */
+export function scoreFromFeynmanCheckpoints(
+  checkpoints: FeynmanCheckpoint[],
+): number {
+  const byId = new Map(checkpoints.map((checkpoint) => [checkpoint.id, checkpoint]));
+  const units: number[] = FEYNMAN_CHECKPOINT_IDS.map((id) => {
+    const status = byId.get(id)?.status ?? "not_started";
+    if (status === "understood") return 1;
+    if (status === "in_progress") return 0.4;
+    return 0;
+  });
+  const total = units.reduce((sum, unit) => sum + unit, 0);
+  return Math.round((total / FEYNMAN_CHECKPOINT_IDS.length) * 100);
+}
+
+export function feynmanScenarioSummary(checkpoints: FeynmanCheckpoint[]): {
+  score: number;
+  verdict: string;
+  evidence: string;
+} {
+  const checks = taskChecksFromFeynmanCheckpoints(checkpoints);
+  const met = checks.filter((check) => check.status === "met").length;
+  const leftover = checks
+    .filter((check) => check.status !== "met")
+    .map((check) => check.label);
+  const score = scoreFromFeynmanCheckpoints(checkpoints);
+  const verdict =
+    leftover.length === 0
+      ? `四个检查点均已讲清（${met}/4）。`
+      : `练习中已讲清 ${met}/4 项检查点；未完成：${leftover.join("、")}。`;
+  const evidence = checks
+    .map((check) => `${check.label}：${check.evidence?.trim() || "暂无摘录"}`)
+    .join(" ");
+  return { score, verdict, evidence };
+}
+
 export type FeynmanState = {
   learnerRole: FeynmanLearnerRole;
   difficulty: FeynmanDifficulty;
@@ -110,6 +188,8 @@ export type DebateTurn = {
   audioFile?: string;
   /** 用于删除该轮独立 WAV 的录音标识。 */
   audioRecordingId?: string;
+  /** 模型这一轮回复的思考过程（reasoning）；有值才展示，无值不展示。 */
+  reasoning?: string;
 };
 
 export type DebateState = {

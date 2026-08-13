@@ -10,7 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test src/finalReport.test.ts"
+    "test": "tsx --test src/finalReport.test.ts src/sanitizeReasoning.test.ts src/feynman.test.ts"
   },
   "dependencies": {
     "@expr-talk/shared": "*"

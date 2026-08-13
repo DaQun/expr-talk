@@ -1,6 +1,7 @@
 import type { PracticeMode, ScoreRubric, TrainingGoal } from "./mode";
 import type { SessionMetrics } from "./metrics";
 import type { StructuredReport } from "./report";
+import type { FeynmanCheckpoint } from "./session";
 
 export type LLMTask =
   | "realtime_hint"
@@ -41,6 +42,8 @@ export type LLMReportInput = {
   metrics: SessionMetrics;
   userProfile?: Record<string, unknown>;
   rubric?: ScoreRubric;
+  /** 费曼练习中已累计的检查点；复盘不得另起一套更严的清单。 */
+  feynmanCheckpoints?: FeynmanCheckpoint[];
 };
 
 export type LLMTaskResultMap = {

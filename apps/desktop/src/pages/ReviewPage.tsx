@@ -14,15 +14,21 @@ import {
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   ISSUE_CODE_LABELS,
-  SCORE_DIMENSION_LABELS,
+  PRACTICE_MODE_LABELS,
+  REVIEW_METRIC_THRESHOLDS,
   normalizeIssueCode,
+  normalizePracticeMode,
+  feynmanScenarioSummary,
+  taskChecksFromFeynmanCheckpoints,
   type AttemptComparison,
   type DimensionReview,
   type EvaluationDimensionKey,
+  type IssueCode,
   type ScoreDimension,
 } from "@expr-talk/shared";
 import { useSessionStore } from "@/state/sessionStore";
 import { ComparisonCard } from "@/components/ComparisonCard";
+import { ConversationTimeline } from "@/components/ConversationTimeline";
 import {
   buildEmptyTranscriptGuidance,
   GuidancePanel,
@@ -72,11 +78,16 @@ function highlightTranscript(
   originals.forEach((original, mark) => {
     const needle = original.trim();
     if (needle.length < 4) return;
-    const start = text.indexOf(needle);
-    if (start < 0) return;
-    const end = start + needle.length;
-    if (matches.some((m) => start < m.end && end > m.start)) return;
-    matches.push({ start, end, mark });
+    let fromIndex = 0;
+    while (fromIndex < text.length) {
+      const start = text.indexOf(needle, fromIndex);
+      if (start < 0) break;
+      const end = start + needle.length;
+      if (!matches.some((m) => start < m.end && end > m.start)) {
+        matches.push({ start, end, mark });
+      }
+      fromIndex = end;
+    }
   });
   matches.sort((a, b) => a.start - b.start);
   const segments: TranscriptSegment[] = [];
@@ -95,6 +106,8 @@ function highlightTranscript(
 
 type ComparisonHighlight = {
   label: string;
+  before: number;
+  after: number;
   delta: number;
   good: boolean | null;
 };
@@ -107,14 +120,27 @@ function buildComparisonHighlights(
   const target = cmp.deltas.targetDimension;
   if (target && cmp.deltas.targetDimensionDelta != null) {
     const delta = cmp.deltas.targetDimensionDelta;
-    items.push({
-      label: DIMENSION_LABELS[target],
-      delta,
-      good: delta === 0 ? null : delta > 0,
-    });
+    const before = cmp.before.dimensionScores?.[target];
+    const after = cmp.after.dimensionScores?.[target];
+    if (before != null && after != null) {
+      items.push({
+        label: DIMENSION_LABELS[target],
+        before,
+        after,
+        delta,
+        good: delta === 0 ? null : delta > 0,
+      });
+    }
   }
+  const usesFillerRate = cmp.deltas.fillerRateDelta != null;
   items.push({
-    label: cmp.deltas.fillerRateDelta != null ? "填充词/百字" : "填充词",
+    label: usesFillerRate ? "填充词/百字" : "填充词",
+    before: usesFillerRate
+      ? (cmp.before.fillerRate ?? cmp.before.fillerCount)
+      : cmp.before.fillerCount,
+    after: usesFillerRate
+      ? (cmp.after.fillerRate ?? cmp.after.fillerCount)
+      : cmp.after.fillerCount,
     delta: cmp.deltas.fillerRateDelta ?? cmp.deltas.fillerDelta,
     good:
       (cmp.deltas.fillerRateDelta ?? cmp.deltas.fillerDelta) === 0
@@ -132,12 +158,18 @@ function buildComparisonHighlights(
     const before = distance(cmp.before.wordsPerMinute);
     const after = distance(cmp.after.wordsPerMinute);
     items.push({
-      label: "语速",
+      label: "语速（字/分）",
+      before: cmp.before.wordsPerMinute,
+      after: cmp.after.wordsPerMinute,
       delta: cmp.deltas.wpmDelta,
       good: before === after ? null : after < before,
     });
   }
   return items.slice(0, 3);
+}
+
+function formatComparisonNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function averageScores(
@@ -151,7 +183,22 @@ function averageScores(
   return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
-type SignalStatus = "正常" | "已记录" | "偏低" | "偏高" | "偏多" | "未评估";
+type SignalStatus =
+  | "正常"
+  | "已记录"
+  | "偏低"
+  | "偏高"
+  | "偏多"
+  | "样本不足"
+  | "未评估";
+
+type ObjectiveSignal = {
+  id: string;
+  label: string;
+  value: string;
+  status: SignalStatus;
+  detail: string;
+};
 
 const PACE_RANGES: Record<string, [number, number]> = {
   free: [160, 240],
@@ -191,6 +238,10 @@ export function ReviewPage() {
   const [showAllEvidence, setShowAllEvidence] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
   const [showAudio, setShowAudio] = useState(false);
+  const [showAllSignals, setShowAllSignals] = useState(false);
+  const [showSecondaryIssues, setShowSecondaryIssues] = useState(false);
+  const [showComparisonDetail, setShowComparisonDetail] = useState(false);
+  const [showLogicReview, setShowLogicReview] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [openDimension, setOpenDimension] = useState<
     EvaluationDimensionKey | null | undefined
@@ -207,6 +258,14 @@ export function ReviewPage() {
 
   useEffect(() => {
     setOpenDimension(undefined);
+    setShowAllEvidence(false);
+    setShowAllSignals(false);
+    setShowSecondaryIssues(false);
+    setShowComparisonDetail(false);
+    setShowLogicReview(false);
+    setShowDetails(false);
+    setShowTranscript(false);
+    setShowAudio(false);
   }, [current?.id]);
 
   const profileQuery = useQuery({
@@ -224,6 +283,9 @@ export function ReviewPage() {
     (diskAudioPath && audioApi.isTauri()
       ? convertFileSrc(diskAudioPath)
       : null);
+  const hasConversationTimeline = Boolean(
+    current?.debate && current.debate.turns.length > 0,
+  );
   const turnAudio = (current?.debate?.turns ?? [])
     .filter((turn) => turn.role === "user" && Boolean(turn.audioFile))
     .map((turn) => ({
@@ -233,41 +295,51 @@ export function ReviewPage() {
       durationSec: turn.durationSec,
       url: audioApi.isTauri() ? convertFileSrc(turn.audioFile!) : null,
     }));
+  /** 分轮录音已在时间线播放时，原始材料不再重复列录音 */
+  const audioCoveredByTimeline =
+    hasConversationTimeline && turnAudio.length > 0;
   const audioMaterials =
-    turnAudio.length > 0
-      ? turnAudio
-      : playableAudioUrl
-        ? [
-            {
-              id: "legacy-audio",
-              label: current?.debate ? "最后一轮录音" : "本次录音",
-              path: diskAudioPath,
-              url: playableAudioUrl,
-              durationSec: current?.durationSec,
-            },
-          ]
-        : [];
-  const hasAudio = audioMaterials.length > 0;
+    audioCoveredByTimeline
+      ? []
+      : turnAudio.length > 0
+        ? turnAudio
+        : playableAudioUrl
+          ? [
+              {
+                id: "legacy-audio",
+                label: current?.debate ? "最后一轮录音" : "本次录音",
+                path: diskAudioPath,
+                url: playableAudioUrl,
+                durationSec: current?.durationSec,
+              },
+            ]
+          : [];
+  const hasAudio =
+    audioMaterials.length > 0 ||
+    turnAudio.length > 0 ||
+    Boolean(playableAudioUrl);
   const canReanalyze = hasTranscript || hasAudio;
-  const primaryIssue = report?.topIssues[0];
   const next = report?.nextPractice;
+  const targetIssueCode = normalizeIssueCode(next?.targetIssue);
+  const focusIssue = report?.topIssues.find(
+    (issue) => normalizeIssueCode(issue.code) === targetIssueCode,
+  ) ?? report?.topIssues[0];
   const cmp = comparison ?? current?.comparison ?? null;
-  const currentPaceRange = PACE_RANGES[current?.mode ?? "free"] ?? PACE_RANGES.free;
+  const currentPaceRange =
+    PACE_RANGES[normalizePracticeMode(current?.mode)] ?? PACE_RANGES.free;
   const nextStepTitle = hasTranscript
-    ? (primaryIssue?.title ??
+    ? (focusIssue?.title ??
       (next ? issueLabel(next.targetIssue) : "整体较稳，保持节奏"))
     : "缺少逐字稿";
   const nextStepSuggestion = hasTranscript
-    ? (primaryIssue?.suggestion ?? next?.instruction ?? report?.summary ?? "")
+    ? (next?.instruction?.trim() ||
+      focusIssue?.suggestion?.trim() ||
+      report?.summary ||
+      "")
     : "先解决录音或识别问题，生成逐字稿后才能给出可复练目标。";
-  const recurringIssue = primaryIssue
+  const recurringIssue = targetIssueCode
     ? profileQuery.data?.recurringIssues.find(
-        (issue) =>
-          issue.code ===
-          normalizeIssueCode(
-            primaryIssue.code,
-            `${primaryIssue.title} ${primaryIssue.suggestion ?? ""}`,
-          ),
+        (issue) => issue.code === targetIssueCode,
       )
     : undefined;
   const reviewedSessionCount = profileQuery.data?.reviewedSessionCount;
@@ -478,23 +550,21 @@ export function ReviewPage() {
   }
 
   const metrics = current.metrics;
-  const modelScores = Object.entries(report.scores).filter(
-    (entry): entry is [ScoreDimension, number] => typeof entry[1] === "number",
+  const normalizedMode = normalizePracticeMode(current.mode);
+  const feynmanCheckpoints = current.debate?.feynman?.checkpoints ?? [];
+  const feynmanAligned =
+    normalizedMode === "feynman" && feynmanCheckpoints.length > 0
+      ? feynmanScenarioSummary(feynmanCheckpoints)
+      : null;
+  const alignedTaskChecks = feynmanAligned
+    ? taskChecksFromFeynmanCheckpoints(feynmanCheckpoints)
+    : undefined;
+  const scoreMap = new Map(
+    Object.entries(report.scores).filter(
+      (entry): entry is [ScoreDimension, number] => typeof entry[1] === "number",
+    ),
   );
-  const scorePriorityByMode: Record<string, ScoreDimension[]> = {
-    free: ["logic", "structure", "clarity", "directness", "density"],
-    short_video: ["logic", "hook", "density", "rhythm", "memorability"],
-    debate: ["logic", "persuasiveness", "structure", "clarity", "directness"],
-    feynman: ["clarity", "structure", "logic", "density", "directness"],
-  };
-  const scorePriority = scorePriorityByMode[current.mode] ?? scorePriorityByMode.free;
-  const scoreMap = new Map(modelScores);
-  const featuredScores = scorePriority
-    .flatMap((key) => {
-      const value = scoreMap.get(key);
-      return typeof value === "number" ? ([[key, value]] as Array<[ScoreDimension, number]>) : [];
-    })
-    .slice(0, 3);
+  /** 旧报告无五维时，用细分分聚合兜底；新报告以 dimensionReviews 为准。 */
   const fallbackDimensionScores: Partial<Record<EvaluationDimensionKey, number>> = {
     content: averageScores(scoreMap, ["density", "memorability"]),
     logic: averageScores(scoreMap, ["logic", "structure", "persuasiveness"]),
@@ -502,9 +572,23 @@ export function ReviewPage() {
     scenario_task: averageScores(scoreMap, ["hook", "actionability", "persuasiveness"]),
   };
   const dimensionItems = DIMENSION_ORDER.flatMap((key) => {
-    const review = report.dimensionReviews?.[key];
+    const review =
+      key === "scenario_task" && feynmanAligned
+        ? {
+            score: feynmanAligned.score,
+            verdict: feynmanAligned.verdict,
+            evidence: feynmanAligned.evidence,
+            source: "mixed" as const,
+          }
+        : report.dimensionReviews?.[key];
     const fallbackScore = fallbackDimensionScores[key];
+    // 无声学数据时不展示「语音表现」，避免假维度占位
     if (key === "voice" && !review) return [];
+    // 有题目清单时，即使缺分也保留「场景任务」维，方便展开 checklist
+    const keepForTasks =
+      key === "scenario_task" &&
+      ((alignedTaskChecks ?? report.taskChecks)?.length ?? 0) > 0;
+    if (!review && fallbackScore == null && !keepForTasks) return [];
     return [{
       key,
       label: DIMENSION_LABELS[key],
@@ -512,22 +596,48 @@ export function ReviewPage() {
       verdict: review?.verdict ??
           (fallbackScore != null
             ? "该项来自旧版报告的相关细分分数。"
-            : "当前报告未提供此项判断。"),
+            : keepForTasks
+              ? "题目要求完成情况见下方清单。"
+              : "当前报告未提供此项判断。"),
       evidence: review?.evidence,
       source: review?.source ?? ("llm" as const),
       legacy: !review && fallbackScore != null,
     }];
   });
-  const lowestDimensionKey = dimensionItems
-    .filter((item): item is typeof item & { score: number } => item.score != null)
-    .sort((a, b) => a.score - b.score)[0]?.key;
+  const scoredDimensions = dimensionItems.filter(
+    (item): item is typeof item & { score: number } => item.score != null,
+  );
+  const overallScore =
+    scoredDimensions.length > 0
+      ? Math.round(
+          scoredDimensions.reduce((sum, item) => sum + item.score, 0) /
+            scoredDimensions.length,
+        )
+      : undefined;
+  const weakestDimension = scoredDimensions
+    .slice()
+    .sort((a, b) => a.score - b.score)[0];
+  const lowestDimensionKey = weakestDimension?.key;
   const effectiveOpenDimension =
     openDimension === undefined ? lowestDimensionKey : openDimension;
-  const chars = Math.max(1, metrics?.totalChars ?? 0);
+  const totalChars = metrics?.totalChars ?? 0;
+  const chars = Math.max(1, totalChars);
   const perHundredChars = (count: number) => ((count / chars) * 100).toFixed(1);
   const modePaceRange = currentPaceRange;
   const fillerRate = metrics ? (metrics.fillerCount / chars) * 100 : undefined;
+  const hedgeRate = metrics ? (metrics.hedgeCount / chars) * 100 : undefined;
+  const vagueRate = metrics ? (metrics.vagueWordCount / chars) * 100 : undefined;
   const repetitionPercent = metrics ? metrics.repetitionRate * 100 : undefined;
+  const sampleSufficient =
+    totalChars >= REVIEW_METRIC_THRESHOLDS.minCharsForRateJudgement;
+  const rateStatus = (
+    value: number | undefined,
+    threshold: number,
+  ): SignalStatus => {
+    if (value == null) return "未评估";
+    if (!sampleSufficient) return "样本不足";
+    return value > threshold ? "偏多" : "正常";
+  };
   const debateUserTurns = current.debate?.turns.filter(
     (turn) => turn.role === "user",
   );
@@ -555,9 +665,10 @@ export function ReviewPage() {
   const measuredWordsPerMinute = hasMeasuredDuration
     ? metrics?.wordsPerMinute
     : undefined;
-  const objectiveSignals = metrics
+  const allObjectiveSignals: ObjectiveSignal[] = metrics
     ? [
         {
+          id: "duration",
           label: "时长",
           value: measuredDurationSec
             ? `${Math.round(measuredDurationSec)} 秒`
@@ -568,6 +679,7 @@ export function ReviewPage() {
             : "粘贴文本无法推断口述时长",
         },
         {
+          id: "pace",
           label: "语速",
           value: measuredWordsPerMinute
             ? `${measuredWordsPerMinute} 字/分`
@@ -576,25 +688,124 @@ export function ReviewPage() {
           detail: `本模式参考 ${modePaceRange[0]}-${modePaceRange[1]}`,
         },
         {
+          id: "fillers",
           label: "填充词",
           value: `${perHundredChars(metrics.fillerCount)} 次/百字`,
-          status: fillerRate != null && fillerRate > 3 ? "偏多" as const : "正常" as const,
-          detail: `共 ${metrics.fillerCount} 次，参考 <=3.0`,
+          status: rateStatus(
+            fillerRate,
+            REVIEW_METRIC_THRESHOLDS.fillerRatePerHundred,
+          ),
+          detail: sampleSufficient
+            ? `共 ${metrics.fillerCount} 次，经验参考 <=${REVIEW_METRIC_THRESHOLDS.fillerRatePerHundred.toFixed(1)}`
+            : `共 ${metrics.fillerCount} 次；少于 ${REVIEW_METRIC_THRESHOLDS.minCharsForRateJudgement} 字暂不判断高低`,
         },
         {
+          id: "hedges",
+          label: "犹豫词",
+          value: `${perHundredChars(metrics.hedgeCount)} 次/百字`,
+          status: rateStatus(
+            hedgeRate,
+            REVIEW_METRIC_THRESHOLDS.hedgeRatePerHundred,
+          ),
+          detail: sampleSufficient
+            ? `共 ${metrics.hedgeCount} 次，经验参考 <=${REVIEW_METRIC_THRESHOLDS.hedgeRatePerHundred.toFixed(1)}`
+            : `共 ${metrics.hedgeCount} 次；样本较短`,
+        },
+        {
+          id: "vague",
+          label: "模糊词",
+          value: `${perHundredChars(metrics.vagueWordCount)} 次/百字`,
+          status: rateStatus(
+            vagueRate,
+            REVIEW_METRIC_THRESHOLDS.vagueRatePerHundred,
+          ),
+          detail: sampleSufficient
+            ? `共 ${metrics.vagueWordCount} 次，经验参考 <=${REVIEW_METRIC_THRESHOLDS.vagueRatePerHundred.toFixed(1)}`
+            : `共 ${metrics.vagueWordCount} 次；样本较短`,
+        },
+        {
+          id: "repetition",
           label: "重复率",
           value: `${repetitionPercent?.toFixed(1)}%`,
-          status: repetitionPercent != null && repetitionPercent > 5 ? "偏多" as const : "正常" as const,
-          detail: "参考 <=5.0%",
+          status: rateStatus(
+            metrics.repetitionRate,
+            REVIEW_METRIC_THRESHOLDS.repetitionRate,
+          ),
+          detail: sampleSufficient
+            ? `经验参考 <=${(REVIEW_METRIC_THRESHOLDS.repetitionRate * 100).toFixed(1)}%`
+            : "样本较短，重复比例波动较大",
         },
         {
+          id: "sentence-length",
           label: "平均句长",
           value: `${metrics.avgSentenceLength} 字`,
-          status: metrics.avgSentenceLength > 35 ? "偏高" as const : "正常" as const,
+          status: !sampleSufficient
+            ? "样本不足"
+            : metrics.avgSentenceLength >
+                REVIEW_METRIC_THRESHOLDS.avgSentenceLength
+              ? "偏高"
+              : "正常",
           detail: "按句末标点和字幕句段统计",
         },
+        {
+          id: "density",
+          label: "本地密度分",
+          value: `${metrics.densityScore}`,
+          status: !sampleSufficient
+            ? "样本不足"
+            : metrics.densityScore < REVIEW_METRIC_THRESHOLDS.densityScore
+              ? "偏低"
+              : "正常",
+          detail: "根据填充、犹豫和模糊表达粗估",
+        },
+        ...(metrics.longPauseCount != null
+          ? [{
+              id: "pauses",
+              label: "长停顿",
+              value: `${metrics.longPauseCount} 次`,
+              status: metrics.longPauseCount >=
+                  REVIEW_METRIC_THRESHOLDS.longPauseCount
+                ? "偏多" as const
+                : "正常" as const,
+              detail: `经验参考 <${REVIEW_METRIC_THRESHOLDS.longPauseCount} 次`,
+            }]
+          : []),
       ]
     : [];
+  const signalPriorityByIssue: Partial<Record<IssueCode, string[]>> = {
+    too_many_fillers: ["fillers", "pace", "pauses"],
+    hedging: ["hedges", "vague", "density"],
+    vague_language: ["vague", "density", "sentence-length"],
+    repetition: ["repetition", "sentence-length", "density"],
+    low_density: ["density", "vague", "repetition"],
+    long_pause: ["pauses", "pace", "duration"],
+    long_sentence: ["sentence-length", "pace", "density"],
+    insufficient_duration: ["duration", "pace", "density"],
+  };
+  const preferredSignalIds = targetIssueCode
+    ? signalPriorityByIssue[targetIssueCode]
+    : undefined;
+  const orderedObjectiveSignals = preferredSignalIds
+    ? [
+        ...preferredSignalIds.flatMap((id) => {
+          const signal = allObjectiveSignals.find((item) => item.id === id);
+          return signal ? [signal] : [];
+        }),
+        ...allObjectiveSignals.filter(
+          (item) => !preferredSignalIds.includes(item.id),
+        ),
+      ]
+    : allObjectiveSignals;
+  /** 成绩条只放语速 + 填充词；其余口语指标默认折叠。 */
+  const HEADLINE_SIGNAL_IDS = ["pace", "fillers"] as const;
+  const headlineSignals = HEADLINE_SIGNAL_IDS.flatMap((id) => {
+    const signal = orderedObjectiveSignals.find((item) => item.id === id);
+    return signal ? [signal] : [];
+  });
+  const extraSignals = orderedObjectiveSignals.filter(
+    (item) => !HEADLINE_SIGNAL_IDS.includes(item.id as (typeof HEADLINE_SIGNAL_IDS)[number]),
+  );
+  const visibleExtraSignals = showAllSignals ? extraSignals : [];
   const usedRewriteIndexes = new Set<number>();
   const evidenceItems = report.sentenceFeedback.map((feedback) => {
     const original = feedback.original.trim();
@@ -640,13 +851,47 @@ export function ReviewPage() {
           evidenceItems.map((item) => item.original),
         )
       : null;
+  const taskChecks = alignedTaskChecks ?? report.taskChecks ?? [];
+  const metTaskCount = taskChecks.filter(
+    (check) => check.status === "met",
+  ).length;
+  const sampleSummary = measuredDurationSec
+    ? `${totalChars} 字 / ${Math.round(measuredDurationSec)} 秒`
+    : `${totalChars} 字`;
+  const secondaryIssues = report.topIssues.slice(1);
+  const signalStatusVariant = (status: SignalStatus) =>
+    status === "正常"
+      ? ("success" as const)
+      : status === "未评估" ||
+          status === "已记录" ||
+          status === "样本不足"
+        ? ("secondary" as const)
+        : ("warning" as const);
 
   return (
     <div>
-      <PageHeader title="复盘" description={current.topic} />
+      <PageHeader
+        title="复盘"
+        description={current.topic}
+        action={
+          canReanalyze ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={analyzing}
+              onClick={() => void reanalyzeSession()}
+            >
+              {analyzing ? "评审中…" : "重新评审"}
+            </Button>
+          ) : undefined
+        }
+      />
 
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">
+            {PRACTICE_MODE_LABELS[normalizedMode]}
+          </Badge>
           <Badge>
             {report.source === "llm" ? "大模型报告" : "历史规则报告"}
           </Badge>
@@ -655,17 +900,6 @@ export function ReviewPage() {
           )}
           {analyzeNote && (
             <span className="text-muted-foreground text-sm">{analyzeNote}</span>
-          )}
-          {canReanalyze && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-auto"
-              disabled={analyzing}
-              onClick={() => void reanalyzeSession()}
-            >
-              {analyzing ? "评审中…" : "重新评审"}
-            </Button>
           )}
         </div>
 
@@ -692,32 +926,38 @@ export function ReviewPage() {
             {comparisonHighlights.map((highlight) => (
               <span
                 key={highlight.label}
-                className="flex items-center gap-1 text-xs"
+                className="flex items-center gap-1.5 text-xs"
               >
                 <span className="text-muted-foreground">
                   {highlight.label}
                 </span>
+                <span className="tabular-nums">
+                  {formatComparisonNumber(highlight.before)} →{" "}
+                  <strong>{formatComparisonNumber(highlight.after)}</strong>
+                </span>
                 <strong
                   className={cn(
-                    "tabular-nums",
+                    "tabular-nums text-[0.7rem]",
                     highlight.good === true && "text-success",
                     highlight.good === false && "text-destructive",
                   )}
                 >
-                  {highlight.delta > 0
-                    ? `+${highlight.delta}`
-                    : highlight.delta}
+                  ({highlight.delta > 0 ? "+" : ""}
+                  {formatComparisonNumber(highlight.delta)})
                 </strong>
               </span>
             ))}
             <button
               type="button"
               className="text-primary ml-auto text-xs hover:underline"
-              onClick={() =>
-                document
-                  .getElementById("comparison-detail")
-                  ?.scrollIntoView({ behavior: "smooth" })
-              }
+              onClick={() => {
+                setShowComparisonDetail(true);
+                window.requestAnimationFrame(() => {
+                  document
+                    .getElementById("comparison-detail")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                });
+              }}
             >
               查看对比详情
             </button>
@@ -737,78 +977,8 @@ export function ReviewPage() {
           <GuidancePanel title="本轮无法完成诊断" items={emptyGuidance} />
         )}
 
-        <div className="flex flex-col gap-4">
-        <Card className="order-2 lg:order-1">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg">成绩概览</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed">
-              {report.summary}
-            </p>
-            {featuredScores.length > 0 && (
-              <div>
-                <div className="text-muted-foreground mb-2 text-xs font-semibold tracking-wider uppercase">
-                  大模型评分 · 按本轮场景侧重
-                </div>
-                <div className="grid grid-cols-3 divide-x divide-border overflow-hidden rounded-lg border border-border">
-                  {featuredScores.map(([key, value], index) => (
-                    <div key={key} className="min-w-0 px-3 py-2.5">
-                      <div className="text-muted-foreground truncate text-xs">
-                        {index === 0 ? "核心 · " : ""}
-                        {SCORE_DIMENSION_LABELS[key] ?? key}
-                      </div>
-                      <div className="mt-0.5 text-lg font-semibold tabular-nums">
-                        {value}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {objectiveSignals.length > 0 && (
-              <div>
-                <div className="text-muted-foreground mb-2 text-xs font-semibold tracking-wider uppercase">
-                  客观口语指标 · 本地计算
-                </div>
-                <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3 lg:grid-cols-5">
-                  {objectiveSignals.map((signal) => (
-                    <div
-                      key={signal.label}
-                      className="min-w-0 bg-card px-3.5 py-3"
-                    >
-                      <div className="text-muted-foreground text-xs">
-                        {signal.label}
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-baseline gap-1.5">
-                        <span className="text-base font-semibold tabular-nums">
-                          {signal.value}
-                        </span>
-                        <Badge
-                          variant={
-                            signal.status === "正常"
-                              ? "success"
-                              : signal.status === "未评估" ||
-                                  signal.status === "已记录"
-                                ? "secondary"
-                                : "warning"
-                          }
-                        >
-                          {signal.status}
-                        </Badge>
-                      </div>
-                      <div className="text-muted-foreground mt-1 text-xs leading-relaxed">
-                        {signal.detail}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="surface-hero order-1 border-primary/25 lg:order-2">
+        {/* ① 下一步：唯一行动区 */}
+        <Card className="surface-hero border-primary/25">
           <CardHeader className="pb-2">
             <div className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
               下一步 · 只改这一点
@@ -817,10 +987,10 @@ export function ReviewPage() {
           </CardHeader>
           <CardContent className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.65fr)]">
             <div className="flex flex-col gap-3">
-              {hasTranscript && primaryIssue?.evidence && (
+              {hasTranscript && focusIssue?.evidence && (
                 <div className="border-primary/20 bg-background/70 rounded-lg border px-3.5 py-3 text-sm">
                   <span className="text-muted-foreground">判断依据：</span>
-                  {primaryIssue.evidence}
+                  {focusIssue.evidence}
                 </div>
               )}
               <p className="m-0 text-sm leading-relaxed">
@@ -839,6 +1009,57 @@ export function ReviewPage() {
                       ? "，但正在改善，继续保持。"
                       : "，值得优先解决。"}
                 </p>
+              )}
+              {secondaryIssues.length > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
+                    onClick={() => setShowSecondaryIssues((v) => !v)}
+                    aria-expanded={showSecondaryIssues}
+                  >
+                    另有 {secondaryIssues.length} 个次要问题
+                    {showSecondaryIssues ? (
+                      <ChevronUp className="size-3.5" />
+                    ) : (
+                      <ChevronDown className="size-3.5" />
+                    )}
+                  </button>
+                  {showSecondaryIssues && (
+                    <div className="mt-2 flex flex-col gap-2">
+                      {secondaryIssues.map((issue) => (
+                        <div
+                          key={`${issue.code}-${issue.title}`}
+                          className="bg-muted/25 rounded-lg border border-border px-3 py-2.5 text-sm"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <strong className="font-medium">{issue.title}</strong>
+                            <Badge
+                              variant={
+                                issue.severity === "high"
+                                  ? "destructive"
+                                  : issue.severity === "medium"
+                                    ? "warning"
+                                    : "secondary"
+                              }
+                            >
+                              {issue.severity === "high"
+                                ? "高"
+                                : issue.severity === "medium"
+                                  ? "中"
+                                  : "低"}
+                            </Badge>
+                          </div>
+                          {issue.suggestion && (
+                            <p className="text-muted-foreground mt-1 mb-0 text-xs leading-relaxed">
+                              {issue.suggestion}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
             <div className="flex flex-col gap-3">
@@ -868,21 +1089,155 @@ export function ReviewPage() {
             </div>
           </CardContent>
         </Card>
-        </div>
 
+        {/* ② 成绩条：综合分 + 精简本地指标，单一口径 */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">成绩</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed">
+              {report.summary}
+            </p>
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-[repeat(auto-fit,minmax(120px,1fr))]">
+              <div className="min-w-0 bg-card px-3 py-2.5">
+                <div className="text-muted-foreground truncate text-xs">
+                  综合分
+                </div>
+                <div className="mt-0.5 text-lg font-semibold tabular-nums">
+                  {overallScore ?? "--"}
+                </div>
+                {weakestDimension && (
+                  <div className="text-muted-foreground mt-0.5 truncate text-[0.7rem]">
+                    最弱 · {weakestDimension.label} {weakestDimension.score}
+                  </div>
+                )}
+              </div>
+              {taskChecks.length > 0 && (
+                <button
+                  type="button"
+                  className="min-w-0 bg-card px-3 py-2.5 text-left hover:bg-muted/40"
+                  onClick={() => {
+                    setOpenDimension("scenario_task");
+                    window.requestAnimationFrame(() => {
+                      document
+                        .getElementById("dimension-detail")
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    });
+                  }}
+                  title="查看题目清单"
+                >
+                  <div className="text-muted-foreground truncate text-xs">
+                    任务完成
+                  </div>
+                  <div className="mt-0.5 text-lg font-semibold tabular-nums">
+                    {metTaskCount}/{taskChecks.length}
+                  </div>
+                  <div className="text-primary mt-0.5 text-[0.7rem]">
+                    查看清单
+                  </div>
+                </button>
+              )}
+              {headlineSignals.map((signal) => (
+                <div key={signal.id} className="min-w-0 bg-card px-3 py-2.5">
+                  <div className="text-muted-foreground truncate text-xs">
+                    {signal.label}
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-baseline gap-1.5">
+                    <span className="text-base font-semibold tabular-nums">
+                      {signal.value}
+                    </span>
+                    <Badge variant={signalStatusVariant(signal.status)}>
+                      {signal.status}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+              {metrics && (
+                <div className="min-w-0 bg-card px-3 py-2.5">
+                  <div className="text-muted-foreground truncate text-xs">
+                    样本
+                  </div>
+                  <div className="mt-0.5 text-base font-semibold tabular-nums">
+                    {sampleSummary}
+                  </div>
+                  {!sampleSufficient && (
+                    <div className="text-warning-foreground mt-0.5 text-[0.7rem]">
+                      较短，比例仅供参考
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {extraSignals.length > 0 && (
+              <div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-0"
+                  onClick={() => setShowAllSignals((value) => !value)}
+                >
+                  {showAllSignals
+                    ? "收起更多口语指标"
+                    : `更多口语指标（${extraSignals.length}）`}
+                  {showAllSignals ? (
+                    <ChevronUp className="size-3.5" />
+                  ) : (
+                    <ChevronDown className="size-3.5" />
+                  )}
+                </Button>
+                {visibleExtraSignals.length > 0 && (
+                  <div className="mt-2 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
+                    {visibleExtraSignals.map((signal) => (
+                      <div
+                        key={signal.id}
+                        className="min-w-0 bg-card px-3.5 py-3"
+                      >
+                        <div className="text-muted-foreground text-xs">
+                          {signal.label}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-baseline gap-1.5">
+                          <span className="text-base font-semibold tabular-nums">
+                            {signal.value}
+                          </span>
+                          <Badge variant={signalStatusVariant(signal.status)}>
+                            {signal.status}
+                          </Badge>
+                        </div>
+                        <div className="text-muted-foreground mt-1 text-xs leading-relaxed">
+                          {signal.detail}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 对话时间线：辩论 / 费曼多轮对照（有 turns 才出） */}
+        {current.debate && current.debate.turns.length > 0 && (
+          <ConversationTimeline
+            debate={current.debate}
+            mode={normalizedMode}
+          />
+        )}
+
+        {/* ③ 诊断明细：五维唯一成绩口径；题目清单只在「场景任务」内 */}
         {dimensionItems.length > 0 && (
-          <Card>
+          <Card id="dimension-detail" className="scroll-mt-6">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg">诊断明细</CardTitle>
               <p className="text-muted-foreground mt-1 mb-0 text-sm">
-                四维结论与题目清单；默认展开最弱一项，点击行切换。
+                五维结论（综合分来源）；默认展开最弱一项。题目清单见「场景任务」。
               </p>
             </CardHeader>
             <CardContent className="flex flex-col overflow-hidden rounded-lg border border-border">
               {dimensionItems.map((item, index) => {
                 const isOpen = item.key === effectiveOpenDimension;
                 const checks =
-                  item.key === "scenario_task" ? report.taskChecks : undefined;
+                  item.key === "scenario_task" ? taskChecks : undefined;
                 return (
                   <div
                     key={item.key}
@@ -964,9 +1319,7 @@ export function ReviewPage() {
                         )}
                         <div className="text-muted-foreground mt-2 flex items-center gap-1 text-[0.7rem]">
                           <Info className="size-3" />
-                          {item.legacy
-                            ? "旧报告推算"
-                            : SOURCE_LABELS[item.source]}
+                          {item.legacy ? "旧报告推算" : SOURCE_LABELS[item.source]}
                         </div>
                       </div>
                     )}
@@ -977,54 +1330,13 @@ export function ReviewPage() {
           </Card>
         )}
 
-        {hasTranscript && report.logicReview && (
-          <Card className="border-primary/20">
-            <CardHeader className="pb-3">
-              <div className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
-                整篇逻辑
-              </div>
-              <CardTitle className="text-lg">观点是否被论证清楚</CardTitle>
-              <p className="text-muted-foreground m-0 text-sm leading-relaxed">
-                {report.logicReview.verdict}
-              </p>
-            </CardHeader>
-            <CardContent>
-              <div className="grid overflow-hidden rounded-lg border border-border md:grid-cols-2">
-                {[
-                  ["核心观点", report.logicReview.thesis],
-                  ["论据支撑", report.logicReview.support],
-                  ["推理衔接", report.logicReview.coherence],
-                  ["结论闭环", report.logicReview.closure],
-                ].map(([label, detail], index) => (
-                  <div
-                    key={label}
-                    className={cn(
-                      "min-w-0 px-4 py-3",
-                      index > 0 && "border-t border-border",
-                      index === 1 && "md:border-t-0 md:border-l",
-                      index === 2 && "md:border-l-0",
-                      index === 3 && "md:border-l",
-                    )}
-                  >
-                    <div className="text-muted-foreground text-xs font-medium">
-                      {label}
-                    </div>
-                    <p className="mt-1.5 mb-0 whitespace-pre-wrap text-sm leading-relaxed">
-                      {detail}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
+        {/* ④ 怎么改：原句 vs 建议 */}
         {hasTranscript && evidenceItems.length > 0 && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">关键表达怎么改</CardTitle>
               <p className="text-muted-foreground m-0 text-sm">
-                把原句、问题和建议改写放在一起，按证据逐条看。
+                原句、问题与建议改写对照；默认 3 条。
               </p>
             </CardHeader>
             <CardContent className="flex flex-col gap-2.5">
@@ -1086,138 +1398,187 @@ export function ReviewPage() {
           </Card>
         )}
 
-        <Card>
-          <CardHeader className="pb-0">
-            <button
-              type="button"
-              className="flex w-full items-center justify-between text-left text-[0.95rem] font-semibold"
-              onClick={() => setShowDetails((v) => !v)}
-              aria-expanded={showDetails}
-            >
-              完整报告与原始材料
-              <span className="text-muted-foreground flex items-center gap-1 text-sm font-normal">
-                {showDetails ? "收起" : "展开"}
-                {showDetails ? (
-                  <ChevronUp className="size-4" />
-                ) : (
-                  <ChevronDown className="size-4" />
-                )}
-              </span>
-            </button>
-          </CardHeader>
-          {showDetails && (
-            <CardContent className="flex flex-col gap-4 pt-4">
-              {report.topIssues.length > 1 && (
-                <div className="flex flex-col gap-2">
-                  <h3 className="m-0 text-base font-semibold">其他问题</h3>
-                  <div className="flex flex-col gap-2">
-                    {report.topIssues.slice(1).map((issue, index) => (
-                      <div
-                        key={`${issue.code}-${issue.title}`}
-                        className="bg-card flex items-start justify-between gap-3 rounded-lg border border-border px-4 py-3"
-                      >
-                        <div className="min-w-0">
-                          <strong>
-                            {index + 2}. {issue.title}
-                          </strong>
-                          {issue.evidence && (
-                            <div className="text-muted-foreground mt-1 whitespace-pre-wrap text-sm">
-                              证据：{issue.evidence}
-                            </div>
-                          )}
-                          {issue.suggestion && (
-                            <div className="mt-1 whitespace-pre-wrap text-sm">
-                              建议：{issue.suggestion}
-                            </div>
-                          )}
-                        </div>
-                        <Badge
-                          variant={
-                            issue.severity === "high"
-                              ? "destructive"
-                              : issue.severity === "medium"
-                                ? "warning"
-                                : "secondary"
-                          }
-                        >
-                          {issue.severity === "high"
-                            ? "高"
-                            : issue.severity === "medium"
-                              ? "中"
-                              : "低"}
-                        </Badge>
-                      </div>
-                    ))}
+        {/* ⑤ 按需：整篇逻辑（默认收起） */}
+        {hasTranscript && report.logicReview && (
+          <Card className="border-border">
+            <CardHeader className="pb-0">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between text-left"
+                onClick={() => setShowLogicReview((v) => !v)}
+                aria-expanded={showLogicReview}
+              >
+                <div>
+                  <div className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
+                    整篇逻辑
                   </div>
-                </div>
-              )}
-
-              <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowTranscript((v) => !v)}
-                >
-                  {showTranscript ? "收起逐字稿" : "查看逐字稿"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowAudio((v) => !v)}
-                >
-                  {showAudio
-                    ? "收起录音"
-                    : `查看录音${audioMaterials.length > 1 ? `（${audioMaterials.length}）` : ""}`}
-                </Button>
-                {!audioApi.isTauri() && (
-                  <span className="text-muted-foreground self-center text-xs">
-                    浏览器模式
-                  </span>
-                )}
-              </div>
-
-              {showTranscript && (
-                <div className="rounded-lg border border-border px-4 py-3">
-                  <h3 className="mt-0 mb-3 text-base font-semibold">
-                    最终逐字稿
-                  </h3>
-                  {hasTranscript ? (
-                    <>
-                      {transcriptSegments?.some((seg) => seg.mark >= 0) && (
-                        <p className="text-muted-foreground mt-0 mb-3 text-xs">
-                          标黄句子有对应改写建议，点击可跳转。
-                        </p>
-                      )}
-                      <p className="m-0 whitespace-pre-wrap leading-relaxed">
-                        {(transcriptSegments ?? []).map((seg, segIndex) =>
-                          seg.mark < 0 ? (
-                            <span key={segIndex}>{seg.text}</span>
-                          ) : (
-                            <button
-                              key={segIndex}
-                              type="button"
-                              title="查看对应改写建议"
-                              onClick={() => scrollToEvidence(seg.mark)}
-                              className="decoration-warning/70 hover:bg-warning/35 cursor-pointer rounded-sm bg-warning/25 px-0.5 text-left underline decoration-2 underline-offset-2"
-                            >
-                              {seg.text}
-                            </button>
-                          ),
-                        )}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="text-muted-foreground m-0">
-                      无内容。可回练习页粘贴文本再分析。
+                  <CardTitle className="mt-1 text-base">
+                    观点是否被论证清楚
+                  </CardTitle>
+                  {!showLogicReview && (
+                    <p className="text-muted-foreground mt-1 mb-0 line-clamp-1 text-sm">
+                      {report.logicReview.verdict}
                     </p>
                   )}
                 </div>
-              )}
+                {showLogicReview ? (
+                  <ChevronUp className="text-muted-foreground size-4 shrink-0" />
+                ) : (
+                  <ChevronDown className="text-muted-foreground size-4 shrink-0" />
+                )}
+              </button>
+            </CardHeader>
+            {showLogicReview && (
+              <CardContent className="pt-3">
+                <p className="text-muted-foreground m-0 mb-3 text-sm leading-relaxed">
+                  {report.logicReview.verdict}
+                </p>
+                <div className="grid overflow-hidden rounded-lg border border-border md:grid-cols-2">
+                  {[
+                    ["核心观点", report.logicReview.thesis],
+                    ["论据支撑", report.logicReview.support],
+                    ["推理衔接", report.logicReview.coherence],
+                    ["结论闭环", report.logicReview.closure],
+                  ].map(([label, detail], index) => (
+                    <div
+                      key={label}
+                      className={cn(
+                        "min-w-0 px-4 py-3",
+                        index > 0 && "border-t border-border",
+                        index === 1 && "md:border-t-0 md:border-l",
+                        index === 2 && "md:border-l-0",
+                        index === 3 && "md:border-l",
+                      )}
+                    >
+                      <div className="text-muted-foreground text-xs font-medium">
+                        {label}
+                      </div>
+                      <p className="mt-1.5 mb-0 whitespace-pre-wrap text-sm leading-relaxed">
+                        {detail}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        )}
 
-              {showAudio && (
-                <div className="flex flex-col gap-3 rounded-lg border border-border px-4 py-3">
-                  <h3 className="m-0 text-base font-semibold">录音素材</h3>
-                  {audioMaterials.length > 0 ? (
+        {/* ⑥ 逐字稿 / 录音：有时间线时不重复列分轮录音，只保留全文高亮与重转写 */}
+        {(hasTranscript || audioMaterials.length > 0 || hasAudio) && (
+          <Card>
+            <CardHeader className="pb-0">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between text-left text-[0.95rem] font-semibold"
+                onClick={() => {
+                  setShowDetails((v) => {
+                    const next = !v;
+                    if (next) {
+                      setShowTranscript(true);
+                      if (!audioCoveredByTimeline && audioMaterials.length > 0) {
+                        setShowAudio(true);
+                      }
+                    }
+                    return next;
+                  });
+                }}
+                aria-expanded={showDetails}
+              >
+                {hasConversationTimeline ? "整篇逐字稿" : "原始材料"}
+                <span className="text-muted-foreground flex items-center gap-1 text-sm font-normal">
+                  {hasConversationTimeline
+                    ? "高亮可跳改写"
+                    : audioMaterials.length > 0
+                      ? "逐字稿 · 录音"
+                      : "逐字稿"}
+                  {showDetails ? (
+                    <ChevronUp className="size-4" />
+                  ) : (
+                    <ChevronDown className="size-4" />
+                  )}
+                </span>
+              </button>
+            </CardHeader>
+            {showDetails && (
+              <CardContent className="flex flex-col gap-4 pt-4">
+                {hasConversationTimeline && audioCoveredByTimeline && (
+                  <p className="text-muted-foreground m-0 text-xs leading-relaxed">
+                    分轮发言与录音见上方「对话时间线」。此处为合并全文，便于对照改写高亮。
+                  </p>
+                )}
+
+                {!hasConversationTimeline && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowTranscript((v) => !v)}
+                    >
+                      {showTranscript ? "收起逐字稿" : "查看逐字稿"}
+                    </Button>
+                    {audioMaterials.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowAudio((v) => !v)}
+                      >
+                        {showAudio
+                          ? "收起录音"
+                          : `查看录音${audioMaterials.length > 1 ? `（${audioMaterials.length}）` : ""}`}
+                      </Button>
+                    )}
+                    {!audioApi.isTauri() && (
+                      <span className="text-muted-foreground self-center text-xs">
+                        浏览器模式
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {(showTranscript || hasConversationTimeline) && (
+                  <div className="rounded-lg border border-border px-4 py-3">
+                    {!hasConversationTimeline && (
+                      <h3 className="mt-0 mb-3 text-base font-semibold">
+                        最终逐字稿
+                      </h3>
+                    )}
+                    {hasTranscript ? (
+                      <>
+                        {transcriptSegments?.some((seg) => seg.mark >= 0) && (
+                          <p className="text-muted-foreground mt-0 mb-3 text-xs">
+                            标黄句子有对应改写建议，点击可跳转。
+                          </p>
+                        )}
+                        <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed">
+                          {(transcriptSegments ?? []).map((seg, segIndex) =>
+                            seg.mark < 0 ? (
+                              <span key={segIndex}>{seg.text}</span>
+                            ) : (
+                              <button
+                                key={segIndex}
+                                type="button"
+                                title="查看对应改写建议"
+                                onClick={() => scrollToEvidence(seg.mark)}
+                                className="decoration-warning/70 hover:bg-warning/35 cursor-pointer rounded-sm bg-warning/25 px-0.5 text-left underline decoration-2 underline-offset-2"
+                              >
+                                {seg.text}
+                              </button>
+                            ),
+                          )}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-muted-foreground m-0 text-sm">
+                        无内容。可回练习页粘贴文本再分析。
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {showAudio && audioMaterials.length > 0 && (
+                  <div className="flex flex-col gap-3 rounded-lg border border-border px-4 py-3">
+                    <h3 className="m-0 text-base font-semibold">录音素材</h3>
                     <div className="flex flex-col gap-3">
                       {audioMaterials.map((material) => (
                         <div
@@ -1225,7 +1586,9 @@ export function ReviewPage() {
                           className="bg-muted/30 flex flex-col gap-2 rounded-lg border border-border px-3 py-2.5"
                         >
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="text-sm font-medium">{material.label}</span>
+                            <span className="text-sm font-medium">
+                              {material.label}
+                            </span>
                             {typeof material.durationSec === "number" && (
                               <span className="text-muted-foreground text-xs">
                                 {Math.round(material.durationSec)} 秒
@@ -1250,51 +1613,73 @@ export function ReviewPage() {
                               浏览器模式只能回放本次最新录音。
                             </p>
                           )}
-                          {material.path && (
-                            <p className="text-muted-foreground m-0 font-mono text-xs break-all">
-                              {material.path}
-                            </p>
-                          )}
                         </div>
                       ))}
                       {audioError && (
-                        <p className="text-destructive m-0 text-sm">{audioError}</p>
+                        <p className="text-destructive m-0 text-sm">
+                          {audioError}
+                        </p>
                       )}
                       {lastWavUrl && audioMaterials.length === 1 && (
-                        <Button variant="ghost" size="sm" asChild className="w-fit">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          asChild
+                          className="w-fit"
+                        >
                           <a href={lastWavUrl} download={`${current.id}.wav`}>
                             下载 WAV
                           </a>
                         </Button>
                       )}
                     </div>
-                  ) : (
-                    <p className="text-muted-foreground m-0 text-sm">
-                      没有可回放录音（可能各轮都使用了粘贴文本，或已按隐私设置删除）。
-                    </p>
-                  )}
-                  {hasAudio && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="w-fit"
-                      disabled={analyzing}
-                      onClick={() =>
-                        void reanalyzeSession({ retranscribe: true })
-                      }
-                    >
-                      {analyzing ? "处理中…" : "用最新录音重新评审"}
-                    </Button>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          )}
-        </Card>
+                  </div>
+                )}
 
+                {hasAudio && audioApi.isTauri() && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="w-fit"
+                    disabled={analyzing}
+                    onClick={() =>
+                      void reanalyzeSession({ retranscribe: true })
+                    }
+                  >
+                    {analyzing ? "处理中…" : "用最新录音重新评审"}
+                  </Button>
+                )}
+              </CardContent>
+            )}
+          </Card>
+        )}
+
+        {/* 复练对比详情：顶条摘要 + 此处按需展开，避免两处同时铺开 */}
         {cmp && (
           <div id="comparison-detail" className="scroll-mt-6">
-            <ComparisonCard comparison={cmp} paceRange={modePaceRange} />
+            {showComparisonDetail ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex justify-end">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowComparisonDetail(false)}
+                  >
+                    收起对比详情
+                  </Button>
+                </div>
+                <ComparisonCard comparison={cmp} paceRange={modePaceRange} />
+              </div>
+            ) : comparisonHighlights.length === 0 ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                onClick={() => setShowComparisonDetail(true)}
+              >
+                查看复练对比详情
+              </Button>
+            ) : null}
           </div>
         )}
 

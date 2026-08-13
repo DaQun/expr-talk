@@ -20,6 +20,7 @@ import {
 } from "@expr-talk/shared";
 import { compareAttempts, formatFinalAsrSegment, joinFinalSegments } from "@expr-talk/core";
 import {
+  sanitizeDisplayReasoning,
   type LLMStreamProgress,
 } from "@expr-talk/llm";
 import { api } from "../ipc/client";
@@ -75,6 +76,8 @@ type SessionState = {
   analyzeNote: string | null;
   /** 正在生成的交互式模型回复；完成后才写入正式对话记录。 */
   streamedQuestion: string | null;
+  /** 流式阶段的模型思考过程（reasoning）；有值才展示，无值不展示。 */
+  streamedReasoning: string | null;
   level: number;
   lastWavUrl: string | null;
   lastAudioPath: string | null;
@@ -190,13 +193,25 @@ function extractStreamedQuestion(content?: string): string | null {
   }
 }
 
+function cleanReasoningForDisplay(reasoning?: string | null): string | undefined {
+  if (!reasoning?.trim()) return undefined;
+  const cleaned = sanitizeDisplayReasoning(reasoning);
+  return cleaned || undefined;
+}
+
 function createInteractiveProgressReporter(
   set: (partial: Partial<SessionState>) => void,
 ): (progress: LLMStreamProgress) => void {
   const reportProgress = createLlmProgressReporter(set);
   let lastPreview = "";
+  let lastReasoning = "";
   return (progress) => {
     reportProgress(progress);
+    const reasoning = cleanReasoningForDisplay(progress.reasoning);
+    if (reasoning && reasoning !== lastReasoning) {
+      lastReasoning = reasoning;
+      set({ streamedReasoning: reasoning });
+    }
     const preview = extractStreamedQuestion(progress.content);
     if (!preview || preview === lastPreview) return;
     lastPreview = preview;
@@ -279,10 +294,12 @@ async function handleInteractiveQuestionResult(
   debate: DebateState,
   result: { question: string; understood: boolean; focus?: string; checkpoints?: FeynmanCheckpoint[] },
   round: number,
+  reasoning?: string,
 ): Promise<InteractiveQuestionOutcome> {
+  const displayReasoning = cleanReasoningForDisplay(reasoning);
   const nextDebate: DebateState =
     session.mode === "feynman"
-      ? applyFeynmanEvaluation(debate, result)
+      ? applyFeynmanEvaluation(debate, result, displayReasoning)
       : {
           ...debate,
           phase: "cross_examination",
@@ -295,6 +312,7 @@ async function handleInteractiveQuestionResult(
               round,
               text: result.question,
               createdAt: new Date().toISOString(),
+              ...(displayReasoning ? { reasoning: displayReasoning } : {}),
             },
           ],
         };
@@ -394,7 +412,7 @@ async function buildComparison(
 export const useSessionStore = create<SessionState>((rawSet, get) => {
   const set: (partial: Partial<SessionState>) => void = (partial) => {
     if ("analyzing" in partial) {
-      rawSet({ ...partial, streamedQuestion: null });
+      rawSet({ ...partial, streamedQuestion: null, streamedReasoning: null });
     } else {
       rawSet(partial);
     }
@@ -411,6 +429,7 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
   error: null,
   analyzeNote: null,
   streamedQuestion: null,
+  streamedReasoning: null,
   level: 0,
   lastWavUrl: null,
   lastAudioPath: null,
@@ -448,6 +467,7 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
             error: null,
             analyzeNote: null,
             streamedQuestion: null,
+            streamedReasoning: null,
             level: 0,
             liveSegments: [],
             partialText: "",
@@ -532,6 +552,7 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
       error: null,
       analyzeNote: null,
       streamedQuestion: null,
+      streamedReasoning: null,
       level: 0,
       liveSegments: [],
       partialText: "",
@@ -628,6 +649,7 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
             ? `第 ${next.debate?.currentRound ?? 2} 轮讲解 · 继续补充`
             : `第 ${next.debate?.currentRound ?? 2} 轮回应 · 请回应${interactiveQuestionLabel(current.mode)}`,
         streamedQuestion: null,
+        streamedReasoning: null,
         level: 0,
         liveSegments: [],
         partialText: "",
@@ -734,6 +756,7 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
         error: null,
         analyzeNote: null,
         streamedQuestion: null,
+        streamedReasoning: null,
         level: 0,
         liveSegments: [],
         partialText: "",
@@ -1132,7 +1155,7 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
             createInteractiveProgressReporter(set),
           );
           const outcome = await handleInteractiveQuestionResult(
-            sessionForAnalyze, debateWithUser, result, round,
+            sessionForAnalyze, debateWithUser, result, round, get().streamedReasoning ?? undefined,
           );
           set({
             current: outcome.waiting,
@@ -1298,7 +1321,7 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
         createInteractiveProgressReporter(set),
       );
       const outcome = await handleInteractiveQuestionResult(
-        current, current.debate, result, current.debate.currentRound,
+        current, current.debate, result, current.debate.currentRound, get().streamedReasoning ?? undefined,
       );
       set({
         current: outcome.waiting,
@@ -1396,7 +1419,7 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
         createInteractiveProgressReporter(set),
       );
       const outcome = await handleInteractiveQuestionResult(
-        updated, debateWithUser, result, round,
+        updated, debateWithUser, result, round, get().streamedReasoning ?? undefined,
       );
       set({
         current: outcome.waiting,
@@ -1554,7 +1577,7 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
           createInteractiveProgressReporter(set),
         );
         const outcome = await handleInteractiveQuestionResult(
-          stopped, debate, result, 1,
+          stopped, debate, result, 1, get().streamedReasoning ?? undefined,
         );
         set({
           current: outcome.waiting,

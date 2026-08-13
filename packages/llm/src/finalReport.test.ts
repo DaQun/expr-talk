@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseStructuredReport } from "./finalReport";
+import { alignFeynmanReport, parseStructuredReport } from "./finalReport";
 import {
   chatCompletion,
   setOpenAICompatibleTransport,
@@ -89,6 +89,36 @@ test("normalizes free-form issue codes and ignores model-declared score sources"
   assert.equal(report.topIssues[0]?.code, "unsupported_claim");
   assert.equal(report.nextPractice.targetIssue, "unsupported_claim");
   assert.equal(report.dimensionReviews?.logic?.source, "llm");
+});
+
+test("aligns Feynman review tasks to in-session checkpoints", () => {
+  const report = parseStructuredReport(JSON.stringify({
+    ...baseReport,
+    dimensionReviews: {
+      scenario_task: {
+        score: 35,
+        verdict: "未完成核心任务",
+        evidence: "要求三大成因",
+      },
+    },
+    taskChecks: [
+      { label: "讲清常见成因（需求拉动）", status: "missed" },
+    ],
+  }));
+  const aligned = alignFeynmanReport(report, {
+    mode: "feynman",
+    feynmanCheckpoints: [
+      { id: "definition", status: "understood", evidence: "钱多物价涨" },
+      { id: "mechanism", status: "understood", evidence: "供需失衡" },
+      { id: "example", status: "understood", evidence: "冷饮变贵" },
+      { id: "boundary", status: "in_progress", evidence: "还不清楚" },
+    ],
+  });
+  assert.deepEqual(
+    aligned.taskChecks?.map((check) => check.status),
+    ["met", "met", "met", "partial"],
+  );
+  assert.equal(aligned.dimensionReviews?.scenario_task?.score, 85);
 });
 
 test("keeps version 2 reports compatible", () => {

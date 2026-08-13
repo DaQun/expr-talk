@@ -11,6 +11,8 @@ import {
   type TaskCheck,
   ISSUE_CODES,
   normalizeIssueCode,
+  feynmanScenarioSummary,
+  taskChecksFromFeynmanCheckpoints,
 } from "@expr-talk/shared";
 import { chatCompletion } from "./openai_compatible";
 import type { LLMRequestOptions } from "./types";
@@ -35,17 +37,19 @@ schema:
   "nextPractice": { "targetIssue": string, "instruction": string, "retryPrompt": string, "successCriteria": string[] }
 }
 规则：
-- 必须严格对照 input.topic 和 input.mode 评价；summary 开头点明模式。不得只根据模式猜测题目要求
+- 必须对照 input.topic 和 input.mode 评价；summary 开头点明模式。不得只根据模式猜测题目要求
 - scores 优先覆盖 input.rubric 里权重大的维度；无关维度可省略
-- dimensionReviews 必须输出 content、logic、expression、scenario_task 四项。content 评主题契合、信息价值与洞察；logic 评结构、衔接与论证闭环；expression 评文本可观察的流畅、完整、准确与节奏；scenario_task 评 input.topic 中显式要求和模式目标的完成度
+- dimensionReviews 必须输出 content、logic、expression、scenario_task 四项。content 评主题契合、信息价值与洞察；logic 评结构、衔接与论证闭环；expression 评文本可观察的流畅、完整、准确与节奏
+- 非费曼：scenario_task 评 input.topic 中显式要求和模式目标的完成度；taskChecks 从题目显式要求提取 2-5 项。没有明确要求时，按该模式基本任务判断
+- 费曼：不要自行从题面抽一套任务清单。若 input.feynmanCheckpoints 存在，taskChecks 必须且只能对应这四项（概念定义 / 原理与因果 / 具体例子 / 边界与误解）：understood→met，in_progress→partial，not_started→missed。scenario_task.score 按已讲清比例给分。题面冒号后的清单是训练目标，不是额外教科书标准；不得因用户没说「需求拉动」「购买力下降」等课外术语判 missed，也不得把已 understood 的检查点降为 missed。evidence 可指出仍可改进之处，但 status 以检查点为准
 - 不输出 voice 分数：当前没有音高、能量、真实停顿等声学分析结果，语音表现必须留给页面显示“未评估”
 - 每个 dimensionReview 必须给一句结论和一条可核对证据。仅有文本时不得声称评价了发音、音色、语调或真实停顿
-- taskChecks 从题目中的显式要求提取 2-5 项逐项判断；没有明确要求时，按对应模式的基本任务要求判断。evidence 要简短具体
+- 口误和识别噪音（如 SIL、同音错字）按上下文理解，不要当成知识错误
 - logic 必须评分，不得省略。structure 只评价内容组织和顺序；logic 单独评价：核心观点是否明确、论据是否真正支撑观点、因果/转折是否成立、前后是否矛盾、结论是否由前文推出
 - logicReview 必须从整篇逐字稿出发，不做逐句语病点评：thesis 写核心观点及是否明确；support 写论据与观点的支撑关系；coherence 写推理跳跃、矛盾或衔接；closure 写结论是否闭环；verdict 用一句话概括整条论证链
 - logicReview 每项都要引用或指向逐字稿中的具体内容；内容太短或没有论证时应直说“未形成观点—论据—结论链”，不得虚构论据
 - 辩论模式的 transcript 可能包含“我方”和“反方质询”标签：只评价我方发言，反方内容仅作为回应是否切题的上下文；summary 要概括整场多轮表现
-- 费曼学习法的 transcript 可能包含“讲解”和“小白提问”标签：只评价用户讲解；特别检查定义是否平实准确、因果或步骤是否讲清、例子和边界是否足以让初学者理解。小白确认理解表示本轮学习通过，不等于用户的表达没有改进空间
+- 费曼学习法的 transcript 可能包含“讲解”和“小白提问”标签：只评价用户讲解。小白确认理解表示本轮学习通过，不等于表达没有改进空间
 - topIssues 排序要符合该模式最致命的问题（如口播优先钩子/密度，会议优先结论/可执行）
 - topIssues.code 和 nextPractice.targetIssue 只能使用以下固定编码之一：${ISSUE_CODES.join(", ")}。不得创造新编码、使用中文标题或 F0/F1 等临时编号
 - 每次 nextPractice 只聚焦 1 个主问题，instruction/retryPrompt 要贴合该模式
@@ -66,6 +70,7 @@ export async function generateFinalReport(
       metrics: input.metrics,
       rubric: input.rubric ?? null,
       transcript: input.transcript,
+      feynmanCheckpoints: input.feynmanCheckpoints ?? null,
     },
     null,
     2,
@@ -88,7 +93,7 @@ export async function generateFinalReport(
 
   options?.onProgress?.({ phase: "parsing", receivedChars: raw.length });
   try {
-    return parseStructuredReport(raw);
+    return alignFeynmanReport(parseStructuredReport(raw), input);
   } catch {
     // 兼容接口有时忽略 response_format，补一轮更强约束的重试，避免格式波动中断整场练习。
     const retryRaw = await chatCompletion(
@@ -110,12 +115,36 @@ export async function generateFinalReport(
     );
     options?.onProgress?.({ phase: "parsing", receivedChars: retryRaw.length });
     try {
-      return parseStructuredReport(retryRaw);
+      return alignFeynmanReport(parseStructuredReport(retryRaw), input);
     } catch (retryError) {
       const reason = retryError instanceof Error ? retryError.message : String(retryError);
       throw new Error(`模型连续两次未返回合法复盘 JSON：${reason}`);
     }
   }
+}
+
+/** 费曼复盘以练习中累计的检查点为准，避免另起一套更严的任务清单。 */
+export function alignFeynmanReport(
+  report: StructuredReport,
+  input: Pick<LLMReportInput, "mode" | "feynmanCheckpoints">,
+): StructuredReport {
+  const checkpoints = input.feynmanCheckpoints;
+  if (input.mode !== "feynman" || !checkpoints?.length) return report;
+  const taskChecks = taskChecksFromFeynmanCheckpoints(checkpoints);
+  const summary = feynmanScenarioSummary(checkpoints);
+  return {
+    ...report,
+    taskChecks,
+    dimensionReviews: {
+      ...report.dimensionReviews,
+      scenario_task: {
+        score: summary.score,
+        verdict: summary.verdict,
+        evidence: summary.evidence,
+        source: "mixed",
+      },
+    },
+  };
 }
 
 export function parseStructuredReport(raw: string): StructuredReport {

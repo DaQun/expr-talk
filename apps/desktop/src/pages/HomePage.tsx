@@ -14,8 +14,15 @@ import { useSessionStore } from "@/state/sessionStore";
 import { ModeCard } from "@/components/ModeCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
+import { cn } from "@/lib/utils";
 
 const FLOW = [
   {
@@ -46,113 +53,109 @@ export function HomePage() {
   );
 
   return (
-    <div className="grid gap-4 md:min-h-[calc(100vh-4.5rem)] lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
-      <Card className="surface-hero overflow-hidden border-border/70 py-0">
-        <div className="flex flex-1 items-center p-5 md:p-7">
-          <div className="flex flex-col gap-5">
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="default">本地优先</Badge>
-              <Badge variant="secondary">可量化 · 可复练</Badge>
-              <Badge variant="outline">隐私默认本机</Badge>
+    <div className="flex flex-col gap-5">
+      <PageHeader
+        title="开始一次表达训练"
+        description="选择训练模式，完成一次录音、诊断与同题复练。"
+        className="mb-0"
+        action={
+          <Button variant="outline" asChild>
+            <Link to="/history">查看历史</Link>
+          </Button>
+        }
+      />
+
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)]">
+        <Card className="surface-hero border-primary/25">
+          <CardHeader className="gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Badge>当前模式</Badge>
+              <Badge variant="outline">
+                建议 {MODE_SUGGESTED_DURATION_SEC[draftMode]} 秒
+              </Badge>
             </div>
-            <div className="space-y-3">
-              <h1 className="max-w-xl text-3xl font-semibold tracking-tight text-balance md:text-[2rem] md:leading-[1.15]">
-                把一次表达，
-                <span className="text-gradient-gold">变成可改进的闭环</span>
-              </h1>
-              <p className="text-muted-foreground max-w-lg text-[0.98rem] leading-relaxed">
-                录音与转写默认留在本机；开始练习前配置大模型，用于生成结构化诊断与复练建议。
-              </p>
+            <div className="space-y-2">
+              <CardTitle className="text-2xl leading-tight">
+                {PRACTICE_MODE_LABELS[draftMode]}
+              </CardTitle>
+              <CardDescription className="max-w-2xl text-sm">
+                {MODE_PRACTICE_HINTS[draftMode]}
+              </CardDescription>
             </div>
-            <div className="flex flex-wrap gap-2.5">
+          </CardHeader>
+          <CardContent className="flex flex-col gap-5">
+            <div>
+              <div className="text-muted-foreground mb-2 text-xs font-medium">
+                本轮重点观察
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {scoreLabels.map((label) => (
+                  <Badge key={label} variant="secondary">
+                    {label}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
               <Button size="lg" asChild>
                 <Link to="/practice">
-                  开始今日练习
+                  开始练习
                   <ArrowRight className="size-4" />
                 </Link>
               </Button>
-              <Button size="lg" variant="outline" asChild>
-                <Link to="/history">查看历史</Link>
-              </Button>
+              <span className="text-muted-foreground text-xs">
+                录音与指标默认保存在本机
+              </span>
             </div>
-          </div>
-        </div>
-        <Separator className="bg-border/60" />
-        <div className="grid gap-0 lg:grid-cols-1 xl:grid-cols-3">
-          {FLOW.map((step, i) => {
-            const Icon = step.icon;
-            return (
-              <div
-                key={step.title}
-                className={
-                  i < FLOW.length - 1
-                    ? "border-border/60 flex gap-3 p-4 lg:border-b xl:border-r xl:border-b-0"
-                    : "flex gap-3 p-4"
-                }
-              >
-                <div className="border-primary/20 bg-primary/10 text-primary grid size-9 shrink-0 place-items-center rounded-xl border">
-                  <Icon className="size-4" strokeWidth={1.75} />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium tracking-tight">
-                    {step.title}
-                  </div>
-                  <div className="text-muted-foreground text-xs leading-snug">
-                    {step.desc}
-                  </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">选择训练模式</CardTitle>
+            <CardDescription>
+              自由开口、选题口播、多轮辩论或费曼追问
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-2" role="radiogroup" aria-label="训练模式">
+              {PRACTICE_MODES.map((mode) => (
+                <ModeCard
+                  key={mode}
+                  mode={mode}
+                  selected={draftMode === mode}
+                  onSelect={setDraftMode}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <section
+        className="grid overflow-hidden rounded-lg border border-border bg-card sm:grid-cols-3"
+        aria-label="训练流程"
+      >
+        {FLOW.map((step, index) => {
+          const Icon = step.icon;
+          return (
+            <div
+              key={step.title}
+              className={cn(
+                "flex min-w-0 items-center gap-3 px-4 py-3.5",
+                index > 0 && "border-t border-border sm:border-t-0 sm:border-l",
+              )}
+            >
+              <Icon className="text-primary size-4 shrink-0" strokeWidth={1.8} />
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{step.title}</div>
+                <div className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+                  {step.desc}
                 </div>
               </div>
-            );
-          })}
-        </div>
-      </Card>
-
-      <section className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 surface-elevated">
-        <div>
-          <h2 className="text-sm font-medium tracking-tight">选择训练模式</h2>
-          <p className="text-muted-foreground mt-0.5 text-xs">
-            四种练法：自由开口 · 选题口播 · 多轮辩论 · 费曼追问
-          </p>
-        </div>
-        <div className="grid gap-2.5">
-          {PRACTICE_MODES.map((mode) => (
-            <ModeCard
-              key={mode}
-              mode={mode}
-              selected={draftMode === mode}
-              onSelect={setDraftMode}
-            />
-          ))}
-        </div>
-        <div className="bg-muted/45 rounded-lg border border-border px-3.5 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-muted-foreground text-xs">当前选择</div>
-              <strong className="mt-0.5 block text-sm">
-                {PRACTICE_MODE_LABELS[draftMode]}
-              </strong>
             </div>
-            <Badge variant="outline">
-              建议 {MODE_SUGGESTED_DURATION_SEC[draftMode]} 秒
-            </Badge>
-          </div>
-          <p className="text-muted-foreground mt-2 mb-0 text-xs leading-relaxed">
-            {MODE_PRACTICE_HINTS[draftMode]}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {scoreLabels.map((label) => (
-              <Badge key={label} variant="secondary">
-                {label}
-              </Badge>
-            ))}
-          </div>
-          <Button asChild className="mt-3 w-full">
-            <Link to="/practice">
-              开始练习
-              <ArrowRight className="size-4" />
-            </Link>
-          </Button>
-        </div>
+          );
+        })}
       </section>
     </div>
   );

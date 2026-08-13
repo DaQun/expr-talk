@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { TrainingSession } from "@expr-talk/shared";
 import {
+  scoreFromFeynmanCheckpoints,
+  taskChecksFromFeynmanCheckpoints,
+} from "@expr-talk/shared";
+import {
   applyFeynmanEvaluation,
   formatDebateTranscript,
   initialDebateState,
@@ -22,6 +26,24 @@ function feynmanSession(round: number): TrainingSession {
     debate: { ...initialDebateState("feynman"), currentRound: round },
   };
 }
+
+test("maps Feynman checkpoints to review task checks without extra textbook bars", () => {
+  const checkpoints = [
+    { id: "definition" as const, status: "understood" as const, evidence: "钱多了物价涨了" },
+    {
+      id: "mechanism" as const,
+      status: "understood" as const,
+      evidence: "钱多→购买力强→供需失衡",
+    },
+    { id: "example" as const, status: "understood" as const, evidence: "冷饮和吃面变贵" },
+    { id: "boundary" as const, status: "in_progress" as const, evidence: "承认还不清楚边界" },
+  ];
+  assert.deepEqual(
+    taskChecksFromFeynmanCheckpoints(checkpoints).map((check) => check.status),
+    ["met", "met", "met", "partial"],
+  );
+  assert.equal(scoreFromFeynmanCheckpoints(checkpoints), 85);
+});
 
 test("initializes independent Feynman checkpoints", () => {
   const first = initialDebateState("feynman");

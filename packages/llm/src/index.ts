@@ -5,6 +5,7 @@ export * from "./openai_compatible";
 export * from "./finalReport";
 export * from "./debate";
 export * from "./feynman";
+export * from "./sanitizeReasoning";
 export { openaiLLMProvider } from "./providers/openai";
 export { deepseekLLMProvider } from "./providers/deepseek";
 export { ollamaLLMProvider } from "./providers/ollama";

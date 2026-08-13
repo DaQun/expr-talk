@@ -137,6 +137,7 @@ export function applyFeynmanEvaluation(
     focus?: string;
     checkpoints?: FeynmanCheckpoint[];
   },
+  reasoning?: string,
 ): DebateState {
   const text = result.understood
     ? result.focus
@@ -156,6 +157,7 @@ export function applyFeynmanEvaluation(
         round: state.currentRound,
         text,
         createdAt: new Date().toISOString(),
+        ...(reasoning ? { reasoning } : {}),
       },
     ],
   };

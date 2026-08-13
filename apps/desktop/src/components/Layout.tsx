@@ -113,7 +113,7 @@ export function Layout() {
             <NavLink
               to="/practice"
               className={cn(
-                "border-warning/30 bg-warning/10 text-warning rounded-lg border px-3 py-2 text-xs leading-relaxed",
+                "border-warning/30 bg-warning/10 text-warning animate-in fade-in slide-in-from-top-1 rounded-lg border px-3 py-2 text-xs leading-relaxed duration-200",
                 sidebarCollapsed && "md:size-10 md:p-0 md:text-[0px]",
               )}
               title="录音正在进行，请回到练习页停止或放弃后再切换页面。"

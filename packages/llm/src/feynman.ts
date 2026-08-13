@@ -49,20 +49,66 @@ const CHECKPOINT_FOCUS: Record<FeynmanCheckpoint["id"], string> = {
   boundary: "边界与误解",
 };
 
-const SYSTEM = `你是一个好奇、诚实的中文初学者。用户正用费曼学习法向你解释一个概念。
-角色映射必须严格遵守：speaker=teacher 的文本全部是用户本人给你的讲解；speaker=learner 的文本是你之前提出的问题。不存在另一位老师，也不要把用户当成需要复述答案的学生。
-你只能根据用户在这场对话中已经说过的话判断，不能用自己已有知识补全缺失内容。
-你的任务是判断自己是否已经听懂用户的讲解。只要用户在任意一轮已经清楚说明某个检查点，就将它标为 understood；不得要求用户换句话复述自己已经讲清楚的相同内容。
-如果老师（speaker=teacher）在最新一轮对你提出了一个直接的问题（例如反问某个概念、原理或请你列举），你必须先用自己的话认真回答这个问题，而不是复述旧理解或跳过去另起提问；回答之后，再根据自己能否答上来判断各检查点是否讲清。答不上来或答错时，对应检查点应标记为未讲清，并继续追问。
-老师可能会在你已经确认理解之后，继续追问新的、更深入的问题。每一轮新的追问都是一次新的考验：即使四个检查点此前都已标为 understood，只要你答不上老师最新这一轮的问题，就不得判定理解，必须把 understood 设为 false，并针对你正困惑的那个具体点追问；不得因为旧检查点已 understood 就无视老师的新问题。
-当你真的回答了老师的最新问题并听懂了时，focus 必须是你对「最新这一轮问题」的当场回答，用自己的话、紧扣老师刚问的概念，而不是复用早前轮次那句旧总结；答不上来时，把你正困惑的那个具体点写进 question 追问。
-检查点是跨轮累积的：currentCheckpoints 中已经 understood 的项目不得降级；评估所有历史讲解，不要只看最后一轮。
-如果还不能理解，就只问一个最能暴露缺口的问题，优先问定义、因果机制、例子、边界或易混淆点；不要一次问多个问题，也不要替用户解释。
-只有当你已经能用自己的话说明这个概念是什么、为什么或怎样运作，并能联系到用户给出的例子或适用边界时，才判定理解。
-你返回 understood=true 只表示当前已经理解，不代表结束练习；是否结束由用户决定。
-只输出合法 JSON，不要 Markdown：
+/** 从题面抽出概念名。题库格式为 …解释「通货膨胀」：… */
+export function extractFeynmanConcept(topic: string): string {
+  const trimmed = topic.trim();
+  if (!trimmed) return "";
+  const quoted = trimmed.match(/[「『《]([^」』》]+)[」』》]/);
+  if (quoted?.[1]?.trim()) return quoted[1].trim();
+  const ascii = trimmed.match(/"([^"]+)"/);
+  if (ascii?.[1]?.trim()) return ascii[1].trim();
+  const withoutMode = trimmed.replace(/^【[^】]*】\s*/, "");
+  const beforeColon = withoutMode.split(/[：:]/, 1)[0]?.trim() ?? "";
+  if (beforeColon) return beforeColon.slice(0, 48);
+  return withoutMode.slice(0, 48) || trimmed.slice(0, 48);
+}
+
+export function buildFeynmanTurnUserPayload(
+  state: DebateState,
+  topic: string,
+): Record<string, unknown> {
+  const learnerRole = state.feynman?.learnerRole ?? "outsider";
+  const difficulty = state.feynman?.difficulty ?? "standard";
+  return {
+    concept: extractFeynmanConcept(topic),
+    topicBrief: topic,
+    currentRound: state.currentRound,
+    learnerRole,
+    learnerInstructions: ROLE_GUIDANCE[learnerRole],
+    difficulty,
+    difficultyInstructions: DIFFICULTY_GUIDANCE[difficulty],
+    currentCheckpoints: state.feynman?.checkpoints ?? [],
+    explanations: state.turns.map(({ role, round, text }) => ({
+      speaker: role === "user" ? "user" : "assistant",
+      round,
+      text,
+    })),
+  };
+}
+
+const SYSTEM = `你是一个好奇、诚实、暂时还没完全听懂的中文初学者。用户正用费曼学习法向你解释一个概念。
+
+身份（必须遵守）：
+- explanations 里 speaker=user 是用户的讲解；speaker=assistant 是你之前的提问。
+- 你只提问、不讲课、不替用户补定义或原理。
+- 若用户反过来问你（例如「你能帮我讲讲吗」「这个你知道吗」），不要作答；用一句话把问题抛回去，请对方继续讲未讲清的那一项。
+- concept 只是概念名称。topicBrief 是训练题面（目标清单），不是用户已经说过的话。禁止说「你提到了题面里的某项」。
+
+判断：
+- 只根据用户已经讲过的话判断，不要用自己的学科知识补全。
+- 口误和识别噪音（如 SIL、同音错字）按上下文理解，不要抓住不放。
+- 大白话讲到点子上即可；不得因为没说教科书术语（如「需求拉动」「购买力下降」）就判没讲清。
+- 检查点跨轮累积：currentCheckpoints 里已经 understood 的不得降级。评估全部历史讲解，不要只看最后一轮。
+- 用户任意一轮已经用自己的话讲清某项，就标 understood，不得要求换句复述。
+- 还没听懂时，只问一个最能暴露缺口的问题（定义 / 因果 / 例子 / 边界），不要一次问多个，不要替用户解释。
+- 四个检查点都 understood 时：understood=true，question 必须为空。
+- 任一检查点未齐时：understood=false，question 必须非空。
+- understood=true 只表示你听懂了，不代表结束练习。
+
+最终响应必须是单个 JSON 对象（不要 Markdown、不要代码围栏、不要前言后语），字段：
 {"understood": boolean, "question": string, "focus": string, "checkpoints": [{"id":"definition"|"mechanism"|"example"|"boundary","status":"not_started"|"in_progress"|"understood","evidence":string}]}
-规则：understood 为 false 时 question 必须非空且最多两句、80 字；understood 为 true 时 question 必须为空，focus 用一句话概括你已经理解到的内容。四个 checkpoints 必须全部输出，evidence 只写用户已讲清的内容或当前缺口，不要虚构。`;
+规则：understood 为 false 时 question 最多两句、80 字；understood 为 true 时 question 为空，focus 用一句话概括你听懂的内容。四个 checkpoints 必须全部给出，evidence 只写用户已讲清的内容或当前缺口，不要虚构。
+若你有内部思考过程，思考中不要复述本条格式要求或出现「输出 JSON」之类的收尾语。`;
 
 export async function generateFeynmanTurn(
   state: DebateState,
@@ -70,26 +116,11 @@ export async function generateFeynmanTurn(
   config: LLMConfig,
   options?: LLMRequestOptions,
 ): Promise<FeynmanTurnResult> {
-  const learnerRole = state.feynman?.learnerRole ?? "outsider";
-  const difficulty = state.feynman?.difficulty ?? "standard";
   const messages = [
     { role: "system" as const, content: SYSTEM },
     {
       role: "user" as const,
-      content: JSON.stringify({
-        concept: topic,
-        currentRound: state.currentRound,
-        learnerRole,
-        learnerInstructions: ROLE_GUIDANCE[learnerRole],
-        difficulty,
-        difficultyInstructions: DIFFICULTY_GUIDANCE[difficulty],
-        currentCheckpoints: state.feynman?.checkpoints ?? [],
-        explanations: state.turns.map(({ role, round, text }) => ({
-          speaker: role === "user" ? "teacher" : "learner",
-          round,
-          text,
-        })),
-      }),
+      content: JSON.stringify(buildFeynmanTurnUserPayload(state, topic)),
     },
   ];
   const requestOptions = {
@@ -125,9 +156,6 @@ export async function generateFeynmanTurn(
       focus: CHECKPOINT_FOCUS[missing.id],
     };
   } else if (result.understood) {
-    // 模型自己判定已经听懂：补齐默认 focus。若模型因答不上老师最新追问而返回
-    // understood=false，即使旧检查点已全部 understood 也不强行改判为 true，
-    // 否则老师的新问题会被无视，小白只会复述旧理解。
     result = {
       ...result,
       question: "",

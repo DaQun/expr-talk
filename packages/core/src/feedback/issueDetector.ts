@@ -1,4 +1,8 @@
-import type { Issue, SessionMetrics } from "@expr-talk/shared";
+import {
+  REVIEW_METRIC_THRESHOLDS,
+  type Issue,
+  type SessionMetrics,
+} from "@expr-talk/shared";
 
 export function detectIssues(metrics: SessionMetrics): Issue[] {
   const issues: Issue[] = [];
@@ -33,7 +37,7 @@ export function detectIssues(metrics: SessionMetrics): Issue[] {
     });
   }
 
-  if (metrics.repetitionRate >= 0.12) {
+  if (metrics.repetitionRate >= REVIEW_METRIC_THRESHOLDS.repetitionRate) {
     issues.push({
       code: "repetition",
       title: "重复表述偏多",
@@ -43,7 +47,7 @@ export function detectIssues(metrics: SessionMetrics): Issue[] {
     });
   }
 
-  if (metrics.densityScore < 70) {
+  if (metrics.densityScore < REVIEW_METRIC_THRESHOLDS.densityScore) {
     issues.push({
       code: "low_density",
       title: "信息密度偏低",
@@ -53,7 +57,10 @@ export function detectIssues(metrics: SessionMetrics): Issue[] {
     });
   }
 
-  if ((metrics.longPauseCount ?? 0) >= 3) {
+  if (
+    (metrics.longPauseCount ?? 0) >=
+    REVIEW_METRIC_THRESHOLDS.longPauseCount
+  ) {
     issues.push({
       code: "long_pause",
       title: "长停顿较多",

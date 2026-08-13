@@ -16,6 +16,18 @@ export type SessionMetrics = {
 
 export const METRICS_SCHEMA_VERSION = 1;
 
+/** 复盘页与规则评分共用的经验阈值，避免不同入口给出冲突结论。 */
+export const REVIEW_METRIC_THRESHOLDS = {
+  minCharsForRateJudgement: 80,
+  fillerRatePerHundred: 3,
+  hedgeRatePerHundred: 2,
+  vagueRatePerHundred: 2,
+  repetitionRate: 0.12,
+  avgSentenceLength: 40,
+  densityScore: 70,
+  longPauseCount: 3,
+} as const;
+
 export function emptySessionMetrics(): SessionMetrics {
   return {
     schemaVersion: METRICS_SCHEMA_VERSION,

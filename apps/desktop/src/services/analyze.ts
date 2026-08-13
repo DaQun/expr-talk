@@ -214,6 +214,7 @@ export async function analyzeSession(
         transcript: text,
         metrics,
         rubric: DEFAULT_MODE_RUBRICS[mode],
+        feynmanCheckpoints: session.debate?.feynman?.checkpoints,
       },
       ready.config,
       { signal: controller.signal, onProgress },
