@@ -4,7 +4,7 @@ import type {
   LLMReportInput,
   StructuredReport,
   TestResult,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 
 export type LLMStreamProgress = {
   phase: "connecting" | "streaming" | "parsing";

@@ -1,4 +1,4 @@
-import type { ASRConfig, TestResult, Transcript } from "@expr-talk/shared";
+import type { ASRConfig, TestResult, Transcript } from "@showtalk/shared";
 import type { AudioFile, BatchASRProvider } from "../../types";
 
 /**

@@ -18,11 +18,11 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@expr-talk/shared": ["../../packages/shared/src"],
-      "@expr-talk/core": ["../../packages/core/src"],
-      "@expr-talk/asr": ["../../packages/asr/src"],
-      "@expr-talk/llm": ["../../packages/llm/src"],
-      "@expr-talk/storage": ["../../packages/storage/src"]
+      "@showtalk/shared": ["../../packages/shared/src"],
+      "@showtalk/core": ["../../packages/core/src"],
+      "@showtalk/asr": ["../../packages/asr/src"],
+      "@showtalk/llm": ["../../packages/llm/src"],
+      "@showtalk/storage": ["../../packages/storage/src"]
     }
   },
   "include": ["src"],

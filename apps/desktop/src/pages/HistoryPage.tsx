@@ -6,7 +6,7 @@ import {
   practiceModeLabel,
   type SessionStatus,
   type TrainingSession,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import { Archive, History, Search, Trash2 } from "lucide-react";
 import { api } from "@/ipc/client";
 import { useSessionStore } from "@/state/sessionStore";

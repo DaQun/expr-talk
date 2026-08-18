@@ -1,5 +1,5 @@
 {
-  "name": "@expr-talk/llm",
+  "name": "@showtalk/llm",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,7 +13,7 @@
     "test": "tsx --test src/finalReport.test.ts src/sanitizeReasoning.test.ts src/feynman.test.ts"
   },
   "dependencies": {
-    "@expr-talk/shared": "*"
+    "@showtalk/shared": "*"
   },
   "devDependencies": {
     "tsx": "^4.23.1",

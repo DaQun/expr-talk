@@ -1,4 +1,4 @@
-import type { ASRProviderInfo } from "@expr-talk/shared";
+import type { ASRProviderInfo } from "@showtalk/shared";
 import type { ASRProvider } from "../types";
 import { localSherpaProvider } from "./local-sherpa";
 import { aliyunBailianProvider } from "./aliyun-bailian";

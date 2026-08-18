@@ -4,7 +4,7 @@ import {
   emptySessionMetrics,
   emptyStructuredReport,
   type TrainingSession,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import { buildUserProfile } from "./aggregate";
 
 function session(index: number, issue = "too_many_fillers"): TrainingSession {

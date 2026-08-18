@@ -12,22 +12,22 @@ import type {
   TrainingSession,
   TranscriptSegment,
   UserProfile,
-} from "@expr-talk/shared";
-import { DEFAULT_SETTINGS } from "@expr-talk/shared";
-import { getASRProvider, listASRProviders } from "@expr-talk/asr";
-import { getLLMProvider, listLLMProviders } from "@expr-talk/llm";
-import type { LLMStreamProgress } from "@expr-talk/llm";
+} from "@showtalk/shared";
+import { DEFAULT_SETTINGS } from "@showtalk/shared";
+import { getASRProvider, listASRProviders } from "@showtalk/asr";
+import { getLLMProvider, listLLMProviders } from "@showtalk/llm";
+import type { LLMStreamProgress } from "@showtalk/llm";
 import {
   InMemoryDb,
   SessionRepository,
   SettingsRepository,
-} from "@expr-talk/storage";
+} from "@showtalk/storage";
 import {
   analyzeSession,
   generateDebateQuestion,
   generateFeynmanQuestion,
 } from "../services/analyze";
-import { buildUserProfile } from "@expr-talk/core";
+import { buildUserProfile } from "@showtalk/core";
 import { withTimeout } from "../utils/timeout";
 
 const memoryDb = new InMemoryDb();
@@ -206,7 +206,7 @@ export const api = {
     s.report = result.report;
     s.status = "reviewed";
     await persistSession(s);
-    window.dispatchEvent(new Event("expr-talk:history-changed"));
+    window.dispatchEvent(new Event("showtalk:history-changed"));
     return result.report;
   },
 

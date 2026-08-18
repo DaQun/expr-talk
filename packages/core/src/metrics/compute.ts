@@ -2,7 +2,7 @@ import {
   METRICS_SCHEMA_VERSION,
   type SessionMetrics,
   type TranscriptSegment,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import zhLexicon from "./lexicons/zh.json";
 import { countChars, countWordsMixed } from "./count";
 import { countFillers } from "./filler";

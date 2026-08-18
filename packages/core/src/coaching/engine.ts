@@ -1,9 +1,9 @@
-import type { Issue, NextPractice, PracticeMode } from "@expr-talk/shared";
+import type { Issue, NextPractice, PracticeMode } from "@showtalk/shared";
 import {
   MODE_PRACTICE_HINTS,
   normalizePracticeMode,
   PRACTICE_MODE_LABELS,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 
 /** 每次只给 1 个主要改进目标 */
 export function buildNextPractice(

@@ -1,4 +1,4 @@
-import type { SessionMetrics } from "@expr-talk/shared";
+import type { SessionMetrics } from "@showtalk/shared";
 
 /** 直接性：犹豫词越少越高 */
 export function scoreDirectness(metrics: SessionMetrics): number {

@@ -25,7 +25,7 @@ import {
   type EvaluationDimensionKey,
   type IssueCode,
   type ScoreDimension,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import { useSessionStore } from "@/state/sessionStore";
 import { ComparisonCard } from "@/components/ComparisonCard";
 import { ConversationTimeline } from "@/components/ConversationTimeline";

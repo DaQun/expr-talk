@@ -8,7 +8,7 @@ import {
   Scale,
   UserRound,
 } from "lucide-react";
-import type { DebateState, DebateTurn, FeynmanCheckpoint } from "@expr-talk/shared";
+import type { DebateState, DebateTurn, FeynmanCheckpoint } from "@showtalk/shared";
 import { audioApi } from "@/ipc/audio";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

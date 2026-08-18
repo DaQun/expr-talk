@@ -1,4 +1,4 @@
-import type { ASRConfig, TestResult } from "@expr-talk/shared";
+import type { ASRConfig, TestResult } from "@showtalk/shared";
 import type { StreamingASRProvider, StreamingASRSession } from "../../types";
 
 /** 阿里云百炼 / DashScope 实时 ASR（paraformer-realtime） */

@@ -1,7 +1,7 @@
 import {
   REVIEW_METRIC_THRESHOLDS,
   type SessionMetrics,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 
 /** 清晰度：低填充 + 低模糊 + 合理句长 → 高分 (0-100) */
 export function scoreClarity(metrics: SessionMetrics): number {

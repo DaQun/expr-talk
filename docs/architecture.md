@@ -1,4 +1,6 @@
-# 新一代表达训练系统架构设计
+# ShowTalk 架构设计
+
+> 2026-08-18 由 ExprTalk 更名为 ShowTalk。名称对照、bundle id 与本机数据迁移见 [`rename-to-showtalk.md`](./rename-to-showtalk.md)。
 
 ## 1. 项目定位
 

@@ -31,4 +31,4 @@ rm -f "$TMP_TAR"
 echo "完成: $TARGET_DIR"
 ls -lh "$TARGET_DIR" | head -20
 echo
-echo "可选：export EXPR_TALK_ASR_MODEL_DIR=\"$TARGET_DIR\""
+echo "可选：export SHOWTALK_ASR_MODEL_DIR=\"$TARGET_DIR\""

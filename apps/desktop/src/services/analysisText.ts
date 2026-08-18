@@ -1,4 +1,4 @@
-import type { AnalysisCoverage } from "@expr-talk/shared";
+import type { AnalysisCoverage } from "@showtalk/shared";
 
 export const MAX_ANALYSIS_CHARS = 8_000;
 

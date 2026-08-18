@@ -5,8 +5,8 @@ import type {
   FeynmanLearnerRole,
   PracticeMode,
   TrainingSession,
-} from "@expr-talk/shared";
-import { mergeFeynmanCheckpoints } from "@expr-talk/llm";
+} from "@showtalk/shared";
+import { mergeFeynmanCheckpoints } from "@showtalk/llm";
 
 const FEYNMAN_CHECKPOINTS: FeynmanCheckpoint[] = [
   { id: "definition", status: "not_started" },

@@ -5,7 +5,7 @@ import type {
   StreamingASREvent,
   TestResult,
   Transcript,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 
 export type AudioFile = {
   path: string;

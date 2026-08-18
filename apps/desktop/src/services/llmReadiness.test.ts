@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_SETTINGS } from "@expr-talk/shared";
+import { DEFAULT_SETTINGS } from "@showtalk/shared";
 import { resolveLlmConfig } from "./llmReadiness";
 
 test("blocks an online provider without an API key", () => {

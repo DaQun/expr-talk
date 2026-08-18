@@ -1,4 +1,4 @@
-import type { SessionMetrics } from "@expr-talk/shared";
+import type { SessionMetrics } from "@showtalk/shared";
 
 /** 节奏：语速落在 180–260 字/分更优；长停顿扣分 */
 export function scoreRhythm(metrics: SessionMetrics): number {

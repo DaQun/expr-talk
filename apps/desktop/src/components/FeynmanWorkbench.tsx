@@ -26,12 +26,12 @@ import type {
   PracticeMode,
   PracticeTopic,
   TrainingSession,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import {
   MODE_SUGGESTED_DURATION_SEC,
   PRACTICE_MODE_LABELS,
   PRACTICE_MODES,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import type { DebateRecordingUi } from "@/components/DebateWorkbench";
 import { ReasoningBlock } from "@/components/ReasoningBlock";
 import { Badge } from "@/components/ui/badge";

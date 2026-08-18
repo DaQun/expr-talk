@@ -1,19 +1,19 @@
 {
-  "name": "expr-talk",
+  "name": "showtalk",
   "private": true,
   "version": "0.1.0",
-  "description": "本地优先的表达训练系统（ExprTalk）",
+  "description": "Code is cheap. Show me your talk. — 本地优先的表达训练系统（ShowTalk）",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev -w @expr-talk/desktop",
-    "build": "npm run build -w @expr-talk/desktop",
-    "preview": "npm run preview -w @expr-talk/desktop",
-    "tauri": "npm run tauri -w @expr-talk/desktop",
-    "tauri:dev": "npm run tauri -w @expr-talk/desktop -- dev",
-    "tauri:build": "npm run tauri -w @expr-talk/desktop -- build",
+    "dev": "npm run dev -w @showtalk/desktop",
+    "build": "npm run build -w @showtalk/desktop",
+    "preview": "npm run preview -w @showtalk/desktop",
+    "tauri": "npm run tauri -w @showtalk/desktop",
+    "tauri:dev": "npm run tauri -w @showtalk/desktop -- dev",
+    "tauri:build": "npm run tauri -w @showtalk/desktop -- build",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
   },

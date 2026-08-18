@@ -6,7 +6,7 @@ import {
   setOpenAICompatibleTransport,
   setOpenAICompatibleStreamTransport,
   type OpenAICompatibleTransportResponse,
-} from "@expr-talk/llm";
+} from "@showtalk/llm";
 import { AppProviders } from "./app/providers";
 import { AppRouter } from "./app/router";
 import "./styles/global.css";

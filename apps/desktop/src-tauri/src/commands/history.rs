@@ -213,7 +213,7 @@ pub async fn history_export(app: AppHandle, db: State<'_, DbState>) -> Result<St
         .or_else(|_| app.path().app_data_dir())
         .map_err(|e| e.to_string())?;
     let output = base.join(format!(
-        "ExprTalk-backup-{}.zip",
+        "ShowTalk-backup-{}.zip",
         chrono::Local::now().format("%Y%m%d-%H%M%S")
     ));
     let file = File::create(&output).map_err(|e| format!("创建备份失败: {e}"))?;
@@ -254,7 +254,7 @@ pub async fn history_export(app: AppHandle, db: State<'_, DbState>) -> Result<St
 
 #[tauri::command]
 pub fn app_health() -> Value {
-    json!({ "ok": true, "name": "ExprTalk", "version": "0.1.0" })
+    json!({ "ok": true, "name": "ShowTalk", "version": "0.1.0" })
 }
 
 #[cfg(test)]
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn includes_orphaned_turn_recordings_for_a_session_only() {
         let recordings =
-            std::env::temp_dir().join(format!("expr-talk-history-test-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("showtalk-history-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&recordings).unwrap();
         for name in [
             "session-a.wav",

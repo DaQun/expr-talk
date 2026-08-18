@@ -1,13 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
-  <title id="title">ExprTalk app icon</title>
-  <desc id="desc">A white letter E shaped like speech lines on a deep green rounded square, with a gold feedback dot.</desc>
+  <title id="title">ShowTalk app icon</title>
+  <desc id="desc">A white letter S as a speech ribbon on a deep green rounded square, with a gold feedback dot.</desc>
   <rect x="72" y="72" width="880" height="880" rx="208" fill="#078653"/>
-  <rect x="250" y="230" width="116" height="564" rx="58" fill="#F7FBF9"/>
-  <rect x="314" y="230" width="440" height="116" rx="58" fill="#F7FBF9"/>
-  <rect x="314" y="454" width="330" height="108" rx="54" fill="#F7FBF9"/>
   <path
-    d="M314 678h392c32 0 58 26 58 58s-26 58-58 58H590l72 76-132-76H314c-32 0-58-26-58-58s26-58 58-58Z"
-    fill="#F7FBF9"
+    d="M698 318C686 238 590 228 512 228C400 228 328 286 328 362C328 448 412 478 512 508C612 538 696 572 696 662C696 748 616 796 512 796C408 796 326 744 326 668"
+    fill="none"
+    stroke="#F7FBF9"
+    stroke-width="118"
+    stroke-linecap="round"
+    stroke-linejoin="round"
   />
-  <circle cx="730" cy="508" r="46" fill="#F2B544"/>
+  <circle cx="754" cy="508" r="46" fill="#F2B544"/>
 </svg>

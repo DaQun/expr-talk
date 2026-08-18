@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { ASRConfig, LLMConfig } from "@expr-talk/shared";
+import type { ASRConfig, LLMConfig } from "@showtalk/shared";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { api } from "@/ipc/client";
 import { audioApi, type AsrModelStatus } from "@/ipc/audio";

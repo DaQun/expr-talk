@@ -6,17 +6,17 @@ import {
   type StructuredReport,
   type DebateState,
   type TrainingSession,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import {
   computeSessionMetrics,
   segmentsToUtterances,
-} from "@expr-talk/core";
+} from "@showtalk/core";
 import {
   generateDebateTurn,
   generateFeynmanTurn,
   getLLMProvider,
   type LLMStreamProgress,
-} from "@expr-talk/llm";
+} from "@showtalk/llm";
 import { resolveLlmConfig } from "./llmReadiness";
 import { selectAnalysisText } from "./analysisText";
 

@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn repairs_sizes_after_an_interrupted_write() {
-        let path = std::env::temp_dir().join(format!("expr-talk-wav-{}.wav", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("showtalk-wav-{}.wav", uuid::Uuid::new_v4()));
         {
             let mut file = create_wav_file(&path, 16_000).unwrap();
             file.write_all(&[0u8; 320]).unwrap();

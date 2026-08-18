@@ -4,7 +4,7 @@ import {
   PRACTICE_MODE_LABELS,
   SCORE_DIMENSION_LABELS,
   type ScoreDimension,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import {
   ArrowDown,
   ArrowRight,

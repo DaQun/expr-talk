@@ -14,7 +14,7 @@ import {
   type SentenceFeedbackItem,
   type TrainingGoal,
   type TranscriptSegment,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import { detectIssues } from "./issueDetector";
 import { scoreClarity } from "../scoring/clarity";
 import { scoreDirectness } from "../scoring/directness";

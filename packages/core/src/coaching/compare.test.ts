@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { compareAttempts } from "./compare";
-import { emptySessionMetrics } from "@expr-talk/shared";
-import { emptyStructuredReport } from "@expr-talk/shared";
+import { emptySessionMetrics } from "@showtalk/shared";
+import { emptyStructuredReport } from "@showtalk/shared";
 
 describe("compareAttempts", () => {
   it("marks improved when fillers drop for too_many_fillers", () => {

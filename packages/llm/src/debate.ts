@@ -1,4 +1,4 @@
-import type { DebateState, LLMConfig } from "@expr-talk/shared";
+import type { DebateState, LLMConfig } from "@showtalk/shared";
 import { chatCompletion } from "./openai_compatible";
 import type { LLMRequestOptions } from "./types";
 

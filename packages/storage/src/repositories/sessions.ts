@@ -2,7 +2,7 @@ import type {
   CreateSessionInput,
   HistoryQuery,
   TrainingSession,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import type { InMemoryDb } from "../db";
 
 function nowIso(): string {

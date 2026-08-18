@@ -97,9 +97,11 @@ fn dir_if_valid(p: PathBuf) -> Option<PathBuf> {
 
 pub fn resolve_model_dir(app: &AppHandle) -> Option<PathBuf> {
     // 1) 环境变量优先
-    if let Ok(dir) = std::env::var("EXPR_TALK_ASR_MODEL_DIR") {
-        if let Some(p) = dir_if_valid(PathBuf::from(dir)) {
-            return Some(p);
+    for key in ["SHOWTALK_ASR_MODEL_DIR", "EXPR_TALK_ASR_MODEL_DIR"] {
+        if let Ok(dir) = std::env::var(key) {
+            if let Some(p) = dir_if_valid(PathBuf::from(dir)) {
+                return Some(p);
+            }
         }
     }
 

@@ -1,4 +1,4 @@
-import type { ASRConfig, TestResult } from "@expr-talk/shared";
+import type { ASRConfig, TestResult } from "@showtalk/shared";
 import type { StreamingASRProvider, StreamingASRSession } from "../../types";
 
 /** 腾讯云实时语音识别 */

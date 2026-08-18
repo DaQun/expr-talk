@@ -1,4 +1,4 @@
-import type { TranscriptSegment, Utterance } from "@expr-talk/shared";
+import type { TranscriptSegment, Utterance } from "@showtalk/shared";
 import { normalizeTranscript, removeAsrArtifacts } from "./normalize";
 
 const SENTENCE_SPLIT = /(?<=[。！？!?；;…])|\n+/;

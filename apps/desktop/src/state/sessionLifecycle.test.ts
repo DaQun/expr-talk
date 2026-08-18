@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { TrainingSession } from "@expr-talk/shared";
+import type { TrainingSession } from "@showtalk/shared";
 import {
   scoreFromFeynmanCheckpoints,
   taskChecksFromFeynmanCheckpoints,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import {
   applyFeynmanEvaluation,
   formatDebateTranscript,

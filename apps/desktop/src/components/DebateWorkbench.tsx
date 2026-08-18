@@ -15,8 +15,8 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import type { PracticeMode, PracticeTopic, TrainingSession } from "@expr-talk/shared";
-import { MODE_SUGGESTED_DURATION_SEC, PRACTICE_MODE_LABELS, PRACTICE_MODES } from "@expr-talk/shared";
+import type { PracticeMode, PracticeTopic, TrainingSession } from "@showtalk/shared";
+import { MODE_SUGGESTED_DURATION_SEC, PRACTICE_MODE_LABELS, PRACTICE_MODES } from "@showtalk/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

@@ -5,8 +5,8 @@ import type {
   MetricSnapshot,
   SessionMetrics,
   StructuredReport,
-} from "@expr-talk/shared";
-import { normalizeIssueCode } from "@expr-talk/shared";
+} from "@showtalk/shared";
+import { normalizeIssueCode } from "@showtalk/shared";
 
 export type CompareInput = {
   parentSessionId: string;

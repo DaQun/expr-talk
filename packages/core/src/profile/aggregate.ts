@@ -10,7 +10,7 @@ import {
   type ScoreDimension,
   type TrainingSession,
   type UserProfile,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 
 const SCORE_KEYS = Object.keys(SCORE_DIMENSION_LABELS) as ScoreDimension[];
 

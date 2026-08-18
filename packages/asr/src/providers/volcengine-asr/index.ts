@@ -1,4 +1,4 @@
-import type { ASRConfig, TestResult } from "@expr-talk/shared";
+import type { ASRConfig, TestResult } from "@showtalk/shared";
 import type { StreamingASRProvider, StreamingASRSession } from "../../types";
 
 /** 火山引擎（字节）流式语音识别 */

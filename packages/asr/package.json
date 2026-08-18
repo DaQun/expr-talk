@@ -1,5 +1,5 @@
 {
-  "name": "@expr-talk/asr",
+  "name": "@showtalk/asr",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@expr-talk/shared": "*"
+    "@showtalk/shared": "*"
   },
   "devDependencies": {
     "typescript": "~5.8.3"

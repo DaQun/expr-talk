@@ -1,4 +1,4 @@
-import type { LLMConfig, TestResult } from "@expr-talk/shared";
+import type { LLMConfig, TestResult } from "@showtalk/shared";
 import type { LLMStreamProgress } from "./types";
 
 export type ChatMessage = {

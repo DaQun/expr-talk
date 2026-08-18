@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ExprTalk",
+  "productName": "ShowTalk",
   "version": "0.1.0",
-  "identifier": "com.exprtalk.app",
+  "identifier": "com.showtalk.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "ExprTalk · 表达训练",
+        "title": "ShowTalk",
         "width": 1200,
         "height": 800
       }

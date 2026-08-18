@@ -1,4 +1,4 @@
-# @expr-talk/desktop
+# @showtalk/desktop
 
 Tauri 2 + React 桌面端。
 

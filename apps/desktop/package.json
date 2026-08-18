@@ -1,5 +1,5 @@
 {
-  "name": "@expr-talk/desktop",
+  "name": "@showtalk/desktop",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -12,11 +12,11 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@expr-talk/asr": "*",
-    "@expr-talk/core": "*",
-    "@expr-talk/llm": "*",
-    "@expr-talk/shared": "*",
-    "@expr-talk/storage": "*",
+    "@showtalk/asr": "*",
+    "@showtalk/core": "*",
+    "@showtalk/llm": "*",
+    "@showtalk/shared": "*",
+    "@showtalk/storage": "*",
     "@radix-ui/react-label": "^2.1.15",
     "@radix-ui/react-progress": "^1.1.16",
     "@radix-ui/react-select": "^2.3.7",

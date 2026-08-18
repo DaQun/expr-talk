@@ -69,8 +69,8 @@ function HistorySync({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: ["history"] });
       void queryClient.invalidateQueries({ queryKey: ["profile"] });
     };
-    window.addEventListener("expr-talk:history-changed", refresh);
-    return () => window.removeEventListener("expr-talk:history-changed", refresh);
+    window.addEventListener("showtalk:history-changed", refresh);
+    return () => window.removeEventListener("showtalk:history-changed", refresh);
   }, []);
 
   return children;

@@ -12,8 +12,22 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { APP_NAME, APP_SLOGAN } from "@showtalk/shared";
 import { useSessionStore } from "@/state/sessionStore";
 import appIcon from "@/assets/app-icon.svg";
+
+const SIDEBAR_COLLAPSED_KEY = "showtalk:sidebar-collapsed";
+const LEGACY_SIDEBAR_COLLAPSED_KEY = "expr-talk:sidebar-collapsed";
+
+function readSidebarCollapsed() {
+  const current = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+  if (current !== null) return current === "true";
+  const legacy = window.localStorage.getItem(LEGACY_SIDEBAR_COLLAPSED_KEY);
+  if (legacy === null) return false;
+  window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, legacy);
+  window.localStorage.removeItem(LEGACY_SIDEBAR_COLLAPSED_KEY);
+  return legacy === "true";
+}
 
 const links = [
   { to: "/", label: "首页", end: true, icon: Home },
@@ -25,14 +39,12 @@ const links = [
 
 export function Layout() {
   const recording = useSessionStore((s) => s.current?.status === "recording");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(
-    () => window.localStorage.getItem("expr-talk:sidebar-collapsed") === "true",
-  );
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
 
   function toggleSidebar() {
     setSidebarCollapsed((collapsed) => {
       const next = !collapsed;
-      window.localStorage.setItem("expr-talk:sidebar-collapsed", String(next));
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
       return next;
     });
   }
@@ -80,10 +92,10 @@ export function Layout() {
             />
             <div className={cn("min-w-0", sidebarCollapsed && "md:hidden")}>
               <div className="text-[0.95rem] font-semibold tracking-tight">
-                ExprTalk
+                {APP_NAME}
               </div>
-              <div className="text-muted-foreground text-[0.7rem] tracking-wide">
-                本地优先 · 表达训练
+              <div className="text-muted-foreground text-[0.65rem] leading-snug">
+                {APP_SLOGAN}
               </div>
             </div>
           </div>

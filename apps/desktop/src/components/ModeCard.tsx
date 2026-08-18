@@ -1,8 +1,8 @@
-import type { PracticeMode } from "@expr-talk/shared";
+import type { PracticeMode } from "@showtalk/shared";
 import {
   PRACTICE_MODE_BLURBS,
   PRACTICE_MODE_LABELS,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 

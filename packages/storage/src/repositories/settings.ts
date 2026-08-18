@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type AppSettings } from "@expr-talk/shared";
+import { DEFAULT_SETTINGS, type AppSettings } from "@showtalk/shared";
 import type { InMemoryDb } from "../db";
 
 const SETTINGS_KEY = "app";

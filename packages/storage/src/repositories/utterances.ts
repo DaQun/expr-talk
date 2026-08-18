@@ -1,4 +1,4 @@
-import type { Utterance } from "@expr-talk/shared";
+import type { Utterance } from "@showtalk/shared";
 import type { InMemoryDb } from "../db";
 
 export class UtteranceRepository {

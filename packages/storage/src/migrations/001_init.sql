@@ -1,4 +1,4 @@
--- ExprTalk initial schema (architecture §6)
+-- ShowTalk initial schema (architecture §6)
 
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,

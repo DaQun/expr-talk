@@ -1,5 +1,5 @@
-import type { AppSettings, LLMConfig } from "@expr-talk/shared";
-import { getLLMProvider } from "@expr-talk/llm";
+import type { AppSettings, LLMConfig } from "@showtalk/shared";
+import { getLLMProvider } from "@showtalk/llm";
 
 export type LlmReady =
   | { ok: true; config: LLMConfig; label: string }

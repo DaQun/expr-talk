@@ -11,11 +11,11 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "@expr-talk/shared": path.resolve(__dirname, "../../packages/shared/src"),
-      "@expr-talk/core": path.resolve(__dirname, "../../packages/core/src"),
-      "@expr-talk/asr": path.resolve(__dirname, "../../packages/asr/src"),
-      "@expr-talk/llm": path.resolve(__dirname, "../../packages/llm/src"),
-      "@expr-talk/storage": path.resolve(__dirname, "../../packages/storage/src"),
+      "@showtalk/shared": path.resolve(__dirname, "../../packages/shared/src"),
+      "@showtalk/core": path.resolve(__dirname, "../../packages/core/src"),
+      "@showtalk/asr": path.resolve(__dirname, "../../packages/asr/src"),
+      "@showtalk/llm": path.resolve(__dirname, "../../packages/llm/src"),
+      "@showtalk/storage": path.resolve(__dirname, "../../packages/storage/src"),
     },
   },
   clearScreen: false,

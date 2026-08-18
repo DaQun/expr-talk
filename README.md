@@ -1,10 +1,14 @@
-# ExprTalk — 新一代表达训练系统
+# ShowTalk
+
+**Code is cheap. Show me your talk.**
+
+改写自 Linus Torvalds 的「Talk is cheap. Show me the code.」：代码廉价，开口才算数。
 
 本地优先的口头表达训练桌面应用：录音 → 转写 → 结构化诊断 → 逐句改写 → 复练对比 → 长期能力画像。
 
 支持四种训练模式：自由发挥、口播（按主题）、辩论（多轮质询）、费曼学习法（小白追问）。
 
-架构说明见 [`docs/architecture.md`](./docs/architecture.md)，转写管线规范见 [`docs/transcript-pipeline-spec.md`](./docs/transcript-pipeline-spec.md)。
+仓库：[github.com/DaQun/showtalk](https://github.com/DaQun/showtalk)。架构说明见 [`docs/architecture.md`](./docs/architecture.md)，转写管线规范见 [`docs/transcript-pipeline-spec.md`](./docs/transcript-pipeline-spec.md)。
 
 ## 技术栈
 
@@ -31,6 +35,7 @@ packages/
 docs/
   architecture.md               # 架构设计文档
   transcript-pipeline-spec.md   # 转写管线规范
+  rename-to-showtalk.md         # ExprTalk → ShowTalk 对照与数据迁移
 models/             # 本地 ASR 模型（streaming-zipformer-zh-en）
 scripts/
   download-asr-model.sh  # 下载本地 ASR 模型
@@ -91,6 +96,14 @@ npm run tauri:dev
 ```
 
 模型目录见 `models/README.md`。未下载模型时仍可录音落盘，字幕会提示模型未就绪。
+
+本机数据（会话库、录音、已下载模型）在：
+
+```text
+macOS: ~/Library/Application Support/com.showtalk.app
+```
+
+从旧名 ExprTalk 升级时，启动桌面端会把 `com.exprtalk.app` 里的库和录音迁到上述目录，并改写录音绝对路径。对照见 [`docs/rename-to-showtalk.md`](./docs/rename-to-showtalk.md)。
 
 ## 开发原则（摘要）
 

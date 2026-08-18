@@ -2,7 +2,7 @@ import {
   REVIEW_METRIC_THRESHOLDS,
   type Issue,
   type SessionMetrics,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 
 export function detectIssues(metrics: SessionMetrics): Issue[] {
   const issues: Issue[] = [];

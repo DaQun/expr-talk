@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import {
+  APP_SLOGAN,
   DEFAULT_MODE_RUBRICS,
   MODE_PRACTICE_HINTS,
   MODE_SUGGESTED_DURATION_SEC,
@@ -8,7 +9,7 @@ import {
   SCORE_DIMENSION_LABELS,
   type PracticeMode,
   type ScoreDimension,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import { ArrowRight, Mic, RefreshCw, Target } from "lucide-react";
 import { useSessionStore } from "@/state/sessionStore";
 import { ModeCard } from "@/components/ModeCard";
@@ -56,7 +57,12 @@ export function HomePage() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="开始一次表达训练"
-        description="选择训练模式，完成一次录音、诊断与同题复练。"
+        description={
+          <>
+            <p className="text-foreground/80 mb-1 italic">{APP_SLOGAN}</p>
+            选择训练模式，完成一次录音、诊断与同题复练。
+          </>
+        }
         className="mb-0"
         action={
           <Button variant="outline" asChild>

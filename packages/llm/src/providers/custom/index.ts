@@ -3,7 +3,7 @@ import type {
   LLMReportInput,
   StructuredReport,
   TestResult,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import type { LLMProvider } from "../../types";
 import type { LLMRequestOptions } from "../../types";
 import { testOpenAICompatible } from "../../openai_compatible";

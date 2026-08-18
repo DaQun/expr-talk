@@ -11,18 +11,18 @@ import type {
   TrainingGoal,
   TrainingSession,
   TranscriptSegment,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import {
   DEFAULT_MODE_GOALS,
   DEFAULT_MODE_TOPICS,
   defaultTopicForMode,
   normalizePracticeMode,
-} from "@expr-talk/shared";
-import { compareAttempts, formatFinalAsrSegment, joinFinalSegments } from "@expr-talk/core";
+} from "@showtalk/shared";
+import { compareAttempts, formatFinalAsrSegment, joinFinalSegments } from "@showtalk/core";
 import {
   sanitizeDisplayReasoning,
   type LLMStreamProgress,
-} from "@expr-talk/llm";
+} from "@showtalk/llm";
 import { api } from "../ipc/client";
 import { MicRecorder } from "../audio/recorder";
 import type { AsrEventPayload, AsrModelStatus } from "../ipc/audio";

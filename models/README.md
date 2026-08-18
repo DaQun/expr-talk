@@ -24,8 +24,8 @@ models/streaming-zipformer-zh-en/
 
 ## 路径解析顺序
 
-1. 环境变量 `EXPR_TALK_ASR_MODEL_DIR`
-2. App Data：`~/Library/Application Support/com.exprtalk.app/models/streaming-zipformer-zh-en`（macOS）
+1. 环境变量 `SHOWTALK_ASR_MODEL_DIR`（兼容旧名 `EXPR_TALK_ASR_MODEL_DIR`）
+2. App Data：`~/Library/Application Support/com.showtalk.app/models/streaming-zipformer-zh-en`（macOS）
 3. 仓库 `models/streaming-zipformer-zh-en`（开发）
 
 模型体积较大（约数百 MB），已加入 `.gitignore`。

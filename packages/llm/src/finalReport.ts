@@ -13,7 +13,7 @@ import {
   normalizeIssueCode,
   feynmanScenarioSummary,
   taskChecksFromFeynmanCheckpoints,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import { chatCompletion } from "./openai_compatible";
 import type { LLMRequestOptions } from "./types";
 

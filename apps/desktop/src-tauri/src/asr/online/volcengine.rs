@@ -86,7 +86,7 @@ impl VolcSession {
         });
         let full = if use_v3 {
             json!({
-                "user": { "uid": "expr-talk" },
+                "user": { "uid": "showtalk" },
                 "audio": audio,
                 "request": {
                     "model_name": "bigmodel",
@@ -100,7 +100,7 @@ impl VolcSession {
             let cluster = cfg_str(config, &["cluster"]).if_empty("volcengine_streaming_common");
             json!({
                 "app": { "appid": app_id, "token": token, "cluster": cluster },
-                "user": { "uid": "expr-talk" },
+                "user": { "uid": "showtalk" },
                 "audio": audio,
                 "request": {
                     "reqid": req_id,

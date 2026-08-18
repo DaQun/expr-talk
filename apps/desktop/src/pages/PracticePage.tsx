@@ -14,7 +14,7 @@ import {
   topicsForMode,
   type PracticeMode,
   type ScoreDimension,
-} from "@expr-talk/shared";
+} from "@showtalk/shared";
 import { useSessionStore } from "@/state/sessionStore";
 import { audioApi } from "@/ipc/audio";
 import {

@@ -1,4 +1,4 @@
-import type { LLMProviderInfo } from "@expr-talk/shared";
+import type { LLMProviderInfo } from "@showtalk/shared";
 import type { LLMProvider } from "../types";
 import { openaiLLMProvider } from "./openai";
 import { deepseekLLMProvider } from "./deepseek";

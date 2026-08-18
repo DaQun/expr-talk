@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_SETTINGS, type AppSettings } from "@expr-talk/shared";
+import { DEFAULT_SETTINGS, type AppSettings } from "@showtalk/shared";
 import { api } from "../ipc/client";
 
 type SettingsState = {

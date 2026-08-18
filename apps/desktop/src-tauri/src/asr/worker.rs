@@ -59,7 +59,7 @@ impl AsrHandle {
     pub fn spawn(app: AppHandle) -> Self {
         let (tx, rx) = mpsc::channel::<AsrCmd>();
         thread::Builder::new()
-            .name("expr-talk-asr".into())
+            .name("showtalk-asr".into())
             .spawn(move || worker_loop(app, rx))
             .expect("failed to spawn ASR worker");
         // 不自动 Preload：本地模型需用户手动下载后再用

@@ -1,7 +1,7 @@
 # 训练模式盘点与扩展建议
 
 > 日期：2026-08-12  
-> 范围：ExprTalk 现有训练模式能力地图、缺口分析、可新增方式与落地优先级  
+> 范围：ShowTalk 现有训练模式能力地图、缺口分析、可新增方式与落地优先级  
 > 依据：`packages/shared/src/mode.ts`、`README.md`、`docs/0805.md`、`docs/0805-requirements.md`、`docs/architecture.md`
 
 ---

@@ -98,7 +98,7 @@ export function buildPracticeGuidance(input: {
       id: "error",
       title: mic ? "麦克风权限或采集失败" : "启动失败",
       detail: mic
-        ? `系统设置 → 隐私与安全性 → 麦克风，允许 ExprTalk。原始信息：${input.error}`
+        ? `系统设置 → 隐私与安全性 → 麦克风，允许 ShowTalk。原始信息：${input.error}`
         : input.error,
       severity: "danger",
     });

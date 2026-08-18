@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>ExprTalk 需要使用麦克风进行表达训练录音与实时转写。</string>
+	<string>ShowTalk 需要使用麦克风进行表达训练录音与实时转写。</string>
 </dict>
 </plist>
