@@ -81,7 +81,7 @@ pub async fn audio_start(
     }
 
     let (asr_enabled, asr_message) = if enable {
-        asr.start_async(session_id.clone(), sample_rate, provider.clone(), config);
+        asr.start_async(session_id.clone(), sample_rate, provider.clone(), config)?;
         (true, format!("录音已开始；ASR（{provider}）后台启动"))
     } else {
         (false, "ASR 已禁用".into())

@@ -110,6 +110,16 @@ pub fn resolve_model_dir(app: &AppHandle) -> Option<PathBuf> {
         if let Some(p) = dir_if_valid(base.join("models").join(DEFAULT_MODEL_DIR_NAME)) {
             return Some(p);
         }
+        // ExprTalk → ShowTalk：旧 bundle 里下过的模型
+        if let Some(parent) = base.parent() {
+            let legacy = parent
+                .join("com.exprtalk.app")
+                .join("models")
+                .join(DEFAULT_MODEL_DIR_NAME);
+            if let Some(p) = dir_if_valid(legacy) {
+                return Some(p);
+            }
+        }
     }
 
     // 3) 相对 cwd（tauri dev 常见 cwd = src-tauri）

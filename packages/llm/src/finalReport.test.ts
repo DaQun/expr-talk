@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alignFeynmanReport, parseStructuredReport } from "./finalReport";
+import {
+  alignFeynmanReport,
+  alignFreeReport,
+  parseStructuredReport,
+} from "./finalReport";
+import { freeTopicRequiresThesis } from "@showtalk/shared";
 import {
   chatCompletion,
   setOpenAICompatibleTransport,
@@ -89,6 +94,115 @@ test("normalizes free-form issue codes and ignores model-declared score sources"
   assert.equal(report.topIssues[0]?.code, "unsupported_claim");
   assert.equal(report.nextPractice.targetIssue, "unsupported_claim");
   assert.equal(report.dimensionReviews?.logic?.source, "llm");
+});
+
+test("blank free topics do not require a thesis", () => {
+  assert.equal(
+    freeTopicRequiresThesis("（自由发挥）请输入或口述你想练的主题，说完即可。建议 60–90 秒。"),
+    false,
+  );
+  assert.equal(freeTopicRequiresThesis(""), false);
+  assert.equal(
+    freeTopicRequiresThesis(
+      "【自由发挥】选一个你真正相信的观点，60–90 秒讲清楚：观点、理由、一个例子。",
+    ),
+    true,
+  );
+});
+
+test("aligns blank free reports away from thesis-essay standards", () => {
+  const report = parseStructuredReport(JSON.stringify({
+    ...baseReport,
+    scores: {
+      logic: 50,
+      structure: 55,
+      hook: 45,
+      persuasiveness: 50,
+      memorability: 55,
+      actionability: 68,
+    },
+    taskChecks: [
+      { label: "是否在开头明确告知讲述主题", status: "partial" },
+      { label: "是否按清晰的时间或逻辑顺序组织内容", status: "partial" },
+      { label: "是否在结尾对整体讲述进行总结或收束", status: "missed" },
+    ],
+    topIssues: [
+      {
+        code: "missing_thesis",
+        title: "缺少核心观点或结论性主张",
+        severity: "high",
+      },
+      {
+        code: "unclear_structure",
+        title: "结构松散，层次不分明",
+        severity: "high",
+      },
+      {
+        code: "too_many_fillers",
+        title: "填充词使用频率过高",
+        severity: "medium",
+      },
+    ],
+    nextPractice: {
+      targetIssue: "missing_thesis",
+      instruction: "请用1分钟时间，以‘今天求职上我最有感触的一点是…’开头。",
+      retryPrompt: "开头直接给出核心判断，中间用2个具体事件支撑，结尾用一句话总结。",
+      successCriteria: ["开头10秒内明确给出核心观点", "结尾有明确的总结"],
+    },
+  }));
+
+  const aligned = alignFreeReport(report, {
+    mode: "free",
+    topic: "（自由发挥）请输入或口述你想练的主题，说完即可。建议 60–90 秒。",
+  });
+
+  assert.deepEqual(
+    aligned.topIssues.map((issue) => issue.code),
+    ["unclear_structure", "too_many_fillers"],
+  );
+  assert.equal(aligned.scores.hook, undefined);
+  assert.equal(aligned.scores.persuasiveness, undefined);
+  assert.equal(aligned.scores.logic, 50);
+  assert.deepEqual(
+    aligned.taskChecks?.map((check) => check.label),
+    ["是否按清晰的时间或逻辑顺序组织内容"],
+  );
+  assert.equal(aligned.nextPractice.targetIssue, "unclear_structure");
+  assert.match(aligned.nextPractice.instruction, /自由发挥/);
+  assert.doesNotMatch(aligned.nextPractice.instruction, /核心判断|结论先行/);
+});
+
+test("keeps thesis requirements on free opinion topics and other modes", () => {
+  const report = parseStructuredReport(JSON.stringify({
+    ...baseReport,
+    scores: { logic: 50, hook: 40 },
+    topIssues: [
+      {
+        code: "missing_thesis",
+        title: "缺少核心观点",
+        severity: "high",
+      },
+    ],
+    nextPractice: {
+      targetIssue: "missing_thesis",
+      instruction: "先说结论。",
+      retryPrompt: "重新表达。",
+      successCriteria: ["前 15 秒出现结论"],
+    },
+  }));
+
+  const opinion = alignFreeReport(report, {
+    mode: "free",
+    topic: "【自由发挥】选一个你真正相信的观点，60–90 秒讲清楚：观点、理由、一个例子。",
+  });
+  assert.equal(opinion.topIssues[0]?.code, "missing_thesis");
+  assert.equal(opinion.scores.hook, 40);
+
+  const debate = alignFreeReport(report, {
+    mode: "debate",
+    topic: "远程办公应成默认",
+  });
+  assert.equal(debate.topIssues[0]?.code, "missing_thesis");
 });
 
 test("aligns Feynman review tasks to in-session checkpoints", () => {

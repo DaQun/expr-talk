@@ -76,13 +76,15 @@ impl AsrHandle {
         sample_rate: u32,
         provider: String,
         config: Value,
-    ) {
-        let _ = self.tx.send(AsrCmd::Start {
-            session_id,
-            sample_rate,
-            provider,
-            config,
-        });
+    ) -> Result<(), String> {
+        self.tx
+            .send(AsrCmd::Start {
+                session_id,
+                sample_rate,
+                provider,
+                config,
+            })
+            .map_err(|_| "ASR 工作线程已退出，请重启应用后再试".into())
     }
 
     pub fn feed(&self, session_id: String, pcm: Vec<i16>) {

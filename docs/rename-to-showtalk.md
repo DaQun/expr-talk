@@ -54,6 +54,8 @@
 
 已存在的新文件不会被旧文件覆盖。
 
+换 bundle id 后，macOS 把 ShowTalk 当成新应用：**麦克风权限不会从 ExprTalk 带过来**。若本地 ASR 没有字幕，先重启桌面端，再在「系统设置 → 隐私与安全性 → 麦克风」里允许 ShowTalk。
+
 ## 改名时不要做的事
 
 - 不要把 bundle id 改回 `com.exprtalk.app`，否则会重新写进旧目录。

@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub const LEGACY_BUNDLE_ID: &str = "com.exprtalk.app";
 pub const BUNDLE_ID: &str = "com.showtalk.app";
