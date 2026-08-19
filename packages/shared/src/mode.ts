@@ -421,6 +421,19 @@ export const DEFAULT_MODE_GOALS: Record<PracticeMode, TrainingGoal> = {
   feynman: "improve_structure",
 };
 
+/**
+ * 自由发挥题面是否显式要求观点 / 结论。
+ * 「说完即可」这类空白题不算；「讲清观点、理由、例子」才算。
+ */
+export function freeTopicRequiresThesis(
+  topic: string | null | undefined,
+): boolean {
+  const text = (topic ?? "").replace(/\s+/g, "");
+  if (!text) return false;
+  if (/说完即可/.test(text)) return false;
+  return /观点|立场|结论性|主张|先说结论/.test(text);
+}
+
 /** 练习页提示：本模式怎么练、评什么 */
 export const MODE_PRACTICE_HINTS: Record<PracticeMode, string> = {
   free: "题目可自拟。先开口、有结构即可；卡壳用静默，别用填充词拖时间。",

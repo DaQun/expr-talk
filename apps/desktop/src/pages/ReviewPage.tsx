@@ -16,6 +16,7 @@ import {
   ISSUE_CODE_LABELS,
   PRACTICE_MODE_LABELS,
   REVIEW_METRIC_THRESHOLDS,
+  freeTopicRequiresThesis,
   normalizeIssueCode,
   normalizePracticeMode,
   feynmanScenarioSummary,
@@ -551,6 +552,8 @@ export function ReviewPage() {
 
   const metrics = current.metrics;
   const normalizedMode = normalizePracticeMode(current.mode);
+  const narrativeFree =
+    normalizedMode === "free" && !freeTopicRequiresThesis(current.topic);
   const feynmanCheckpoints = current.debate?.feynman?.checkpoints ?? [];
   const feynmanAligned =
     normalizedMode === "feynman" && feynmanCheckpoints.length > 0
@@ -1413,7 +1416,9 @@ export function ReviewPage() {
                     整篇逻辑
                   </div>
                   <CardTitle className="mt-1 text-base">
-                    观点是否被论证清楚
+                    {narrativeFree
+                      ? "主线是否清楚"
+                      : "观点是否被论证清楚"}
                   </CardTitle>
                   {!showLogicReview && (
                     <p className="text-muted-foreground mt-1 mb-0 line-clamp-1 text-sm">
@@ -1434,12 +1439,20 @@ export function ReviewPage() {
                   {report.logicReview.verdict}
                 </p>
                 <div className="grid overflow-hidden rounded-lg border border-border md:grid-cols-2">
-                  {[
-                    ["核心观点", report.logicReview.thesis],
-                    ["论据支撑", report.logicReview.support],
-                    ["推理衔接", report.logicReview.coherence],
-                    ["结论闭环", report.logicReview.closure],
-                  ].map(([label, detail], index) => (
+                  {(narrativeFree
+                    ? [
+                        ["讲述主线", report.logicReview.thesis],
+                        ["关键细节", report.logicReview.support],
+                        ["衔接", report.logicReview.coherence],
+                        ["收束", report.logicReview.closure],
+                      ]
+                    : [
+                        ["核心观点", report.logicReview.thesis],
+                        ["论据支撑", report.logicReview.support],
+                        ["推理衔接", report.logicReview.coherence],
+                        ["结论闭环", report.logicReview.closure],
+                      ]
+                  ).map(([label, detail], index) => (
                     <div
                       key={label}
                       className={cn(

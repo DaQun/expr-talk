@@ -71,7 +71,28 @@ export function HomePage() {
         }
       />
 
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)]">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(320px,0.72fr)_minmax(0,1fr)]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">选择训练模式</CardTitle>
+            <CardDescription>
+              自由开口、选题口播、多轮辩论或费曼追问
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-2" role="radiogroup" aria-label="训练模式">
+              {PRACTICE_MODES.map((mode) => (
+                <ModeCard
+                  key={mode}
+                  mode={mode}
+                  selected={draftMode === mode}
+                  onSelect={setDraftMode}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="surface-hero border-primary/25">
           <CardHeader className="gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -112,27 +133,6 @@ export function HomePage() {
               <span className="text-muted-foreground text-xs">
                 录音与指标默认保存在本机
               </span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">选择训练模式</CardTitle>
-            <CardDescription>
-              自由开口、选题口播、多轮辩论或费曼追问
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-2" role="radiogroup" aria-label="训练模式">
-              {PRACTICE_MODES.map((mode) => (
-                <ModeCard
-                  key={mode}
-                  mode={mode}
-                  selected={draftMode === mode}
-                  onSelect={setDraftMode}
-                />
-              ))}
             </div>
           </CardContent>
         </Card>

@@ -1,10 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowUp,
   Check,
   CircleStop,
-  Keyboard,
   MessageCircle,
   Mic,
   PanelRightClose,
@@ -29,25 +27,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ReasoningBlock } from "@/components/ReasoningBlock";
+import {
+  PracticeComposer,
+  type DebateRecordingUi,
+  type PracticeInputMode,
+} from "@/components/PracticeComposer";
 import { cn } from "@/lib/utils";
+
+export type { DebateRecordingUi };
 
 /** 距底部多少像素内视为「贴底」，用于判断是否需要自动跟随 */
 const CONVERSATION_STICK_BOTTOM_PX = 64;
-
-type InputMode = "text" | "voice";
-
-/** 辩论录音态所需的实时数据与操作；与闲置态共用底部输入壳，避免整块面板硬切换。 */
-export type DebateRecordingUi = {
-  seconds: number;
-  levelPct: number;
-  asrStatus: string | null;
-  finalSegments: Array<{ id: string; text: string }>;
-  partialText: string;
-  onStop: () => void;
-  onRerecord: () => void;
-};
 
 type DebateWorkbenchProps = {
   draftTopic: string;
@@ -89,12 +80,6 @@ function turnLabel(role: "user" | "opponent") {
   return role === "user" ? "我方" : "反方 AI";
 }
 
-function formatTimer(totalSeconds: number) {
-  const mm = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
-  const ss = String(totalSeconds % 60).padStart(2, "0");
-  return `${mm}:${ss}`;
-}
-
 export function DebateWorkbench({
   draftTopic,
   draftMode,
@@ -130,12 +115,10 @@ export function DebateWorkbench({
   onFinish,
   onAbandon,
 }: DebateWorkbenchProps) {
-  const [inputMode, setInputMode] = useState<InputMode>("voice");
+  const [inputMode, setInputMode] = useState<PracticeInputMode>("voice");
   const [detailsOpen, setDetailsOpen] = useState(true);
   const conversationRef = useRef<HTMLDivElement>(null);
   const conversationAutoFollowRef = useRef(true);
-  const captionScrollRef = useRef<HTMLDivElement>(null);
-  const captionAutoFollowRef = useRef(true);
   const debate = current?.mode === "debate" ? current.debate : undefined;
   const active = recording || waiting || analyzing;
   const hasStarted = Boolean(debate) && active;
@@ -154,9 +137,6 @@ export function DebateWorkbench({
   const pendingReasoning = pendingQuestion
     ? [...(debate?.turns ?? [])].reverse().find((turn) => turn.role === "opponent")?.reasoning
     : undefined;
-  const hasLiveCaption = Boolean(
-    recordingUi.finalSegments.length > 0 || recordingUi.partialText.trim(),
-  );
   // 模型侧内容长度：流式思考/正文或落盘后的质询，任一增长都应触发贴底滚动
   const modelReplySignature = analyzing
     ? `stream:${streamedReasoning?.length ?? 0}:${streamedQuestion?.length ?? 0}`
@@ -214,20 +194,6 @@ export function DebateWorkbench({
     recording,
   ]);
 
-  useEffect(() => {
-    captionAutoFollowRef.current = true;
-  }, [current?.id, recording]);
-
-  useEffect(() => {
-    const container = captionScrollRef.current;
-    if (!container || !captionAutoFollowRef.current) return;
-    const frame = window.requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [recordingUi.finalSegments, recordingUi.partialText, recording]);
-
-  const sendDisabled = !pasteText.trim() || analyzing || !llmReady || recording;
   const canFinish = userTurnCount > 0 && waiting;
   const canAbandonSession =
     Boolean(current) &&
@@ -431,191 +397,32 @@ export function DebateWorkbench({
               </Button>
             )}
 
-            {/* 输入壳：闲置 / 录音共用同一容器，原地扩展，避免整块「录音台」硬切换导致跳动 */}
-            <div className="flex flex-col gap-2.5">
-              <div
-                className={cn(
-                  "grid transition-[grid-template-rows,opacity] duration-300 ease-out",
-                  recording ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100",
-                )}
-                aria-hidden={recording}
-              >
-                <div className="overflow-hidden">
-                  <div className="mb-2.5 flex items-center justify-between gap-3">
-                    <ToggleGroup
-                      type="single"
-                      value={inputMode}
-                      onValueChange={(value) => value && setInputMode(value as InputMode)}
-                      disabled={active || analyzing}
-                      aria-label="辩论输入方式"
-                      className="rounded-lg border border-border bg-muted/35 p-0.5"
-                    >
-                      <ToggleGroupItem value="voice" aria-label="语音输入" className="h-8 rounded-md px-2.5 text-xs data-[state=on]:bg-card data-[state=on]:shadow-sm">
-                        <Mic className="size-3.5" /> 语音
-                      </ToggleGroupItem>
-                      <ToggleGroupItem value="text" aria-label="文字输入" className="h-8 rounded-md px-2.5 text-xs data-[state=on]:bg-card data-[state=on]:shadow-sm">
-                        <Keyboard className="size-3.5" /> 文字
-                      </ToggleGroupItem>
-                    </ToggleGroup>
-                    <span className="text-muted-foreground hidden text-xs sm:block">
-                      {waiting ? "回应反方质询" : "先提交你的立论"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {inputMode === "text" && !recording ? (
-                <div className="flex items-end gap-2">
-                  <Textarea
-                    value={pasteText}
-                    onChange={(event) => onPasteTextChange(event.target.value)}
-                    placeholder={waiting ? "回应反方刚才的质询…" : "先写下你的立论…"}
-                    disabled={analyzing || recording}
-                    rows={2}
-                    className="min-h-20 resize-none rounded-xl bg-card pr-3"
-                    onKeyDown={(event) => {
-                      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                        event.preventDefault();
-                        if (!sendDisabled) onSubmitText();
-                      }
-                    }}
-                  />
-                  <Button
-                    size="icon"
-                    className="size-10 shrink-0 rounded-xl"
-                    disabled={sendDisabled}
-                    onClick={onSubmitText}
-                    aria-label={waiting ? "提交回应" : "提交立论"}
-                    title={waiting ? "提交回应" : "提交立论"}
-                  >
-                    <ArrowUp />
-                  </Button>
-                </div>
-              ) : (
-                <div
-                  className={cn(
-                    "rounded-xl border transition-[border-color,background-color,box-shadow,padding] duration-300 ease-out",
-                    recording
-                      ? "border-warning/35 bg-warning/6 shadow-[inset_0_0_0_1px_oklch(0.8_0.12_85_/_6%)] p-3.5"
-                      : "border-dashed border-border bg-muted/25 px-3 py-2.5",
-                  )}
-                >
-                  {recording ? (
-                    <div className="flex flex-col gap-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex min-w-0 items-center gap-2.5">
-                          <span className="bg-warning size-2 shrink-0 animate-pulse rounded-full" aria-hidden />
-                          <span
-                            className="font-mono text-lg font-semibold tracking-wider tabular-nums"
-                            aria-live="polite"
-                          >
-                            {formatTimer(recordingUi.seconds)}
-                          </span>
-                          <span className="text-muted-foreground text-xs">
-                            {waiting || userTurnCount > 0 ? "本轮回应中" : "立论中"}
-                          </span>
-                        </div>
-                        <span className="text-muted-foreground truncate text-xs">
-                          {recordingUi.asrStatus || "采集中"}
-                        </span>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <div className="bg-muted/60 h-1.5 overflow-hidden rounded-full">
-                          <div
-                            className="bg-warning h-full rounded-full transition-[width] duration-150 ease-out"
-                            style={{ width: `${Math.min(100, recordingUi.levelPct)}%` }}
-                          />
-                        </div>
-                        <p className="text-muted-foreground m-0 text-[0.7rem]">
-                          电平 {recordingUi.levelPct}%
-                          {recordingUi.levelPct < 5 ? " · 请靠近麦克风" : ""}
-                        </p>
-                      </div>
-
-                      <div
-                        ref={captionScrollRef}
-                        className="bg-background/70 max-h-[4.5rem] min-h-[2.75rem] overflow-y-auto rounded-lg border border-border/60 px-3 py-2 text-sm leading-relaxed"
-                        onScroll={(event) => {
-                          const container = event.currentTarget;
-                          const distanceFromBottom =
-                            container.scrollHeight - container.scrollTop - container.clientHeight;
-                          captionAutoFollowRef.current = distanceFromBottom <= 8;
-                        }}
-                      >
-                        {recordingUi.finalSegments.map((segment) => (
-                          <div key={segment.id} className="mb-1 last:mb-0">
-                            {segment.text}
-                          </div>
-                        ))}
-                        {recordingUi.partialText && (
-                          <div className="text-primary/90 mb-1 last:mb-0">{recordingUi.partialText}</div>
-                        )}
-                        {!hasLiveCaption && (
-                          <span className="text-muted-foreground">
-                            {recordingUi.levelPct < 5
-                              ? "请开始说话，电平应跳动…"
-                              : "正在识别…字幕会显示在这里"}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button
-                          size="sm"
-                          disabled={analyzing}
-                          onClick={recordingUi.onStop}
-                        >
-                          <CircleStop className="size-3.5" />
-                          {analyzing
-                            ? "分析中…"
-                            : waiting || userTurnCount > 0
-                              ? "停止本轮回应"
-                              : "停止本轮立论"}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={analyzing}
-                          onClick={recordingUi.onRerecord}
-                          title="丢弃当前录音与字幕，保留题目后重新开始"
-                        >
-                          <RefreshCw className="size-3.5" /> 重新录制
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={analyzing}
-                          onClick={onAbandon}
-                          title="停止麦克风并放弃本次练习"
-                        >
-                          <X className="size-3.5" /> 放弃本次练习
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex min-w-0 items-center gap-2 text-sm">
-                        <Mic className="text-primary size-4 shrink-0" />
-                        <span className="truncate">
-                          {waiting
-                            ? "使用语音回应，实时字幕会显示在这里"
-                            : "使用语音立论，实时字幕会显示在这里"}
-                        </span>
-                      </div>
-                      {/* 主操作入口：waiting 时也必须可点（勿用 active 禁用，active 含 waiting） */}
-                      <Button
-                        size="sm"
-                        disabled={analyzing || !llmReady}
-                        onClick={waiting || hasStarted ? onStartResponse : onStartVoice}
-                      >
-                        <Mic className="size-3.5" /> {waiting || hasStarted ? "开始回应" : "开始立论"}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            <PracticeComposer
+              inputMode={inputMode}
+              onInputModeChange={setInputMode}
+              recording={recording}
+              analyzing={analyzing}
+              llmReady={llmReady}
+              inputLocked={active || analyzing}
+              pasteText={pasteText}
+              onPasteTextChange={onPasteTextChange}
+              recordingUi={recordingUi}
+              onStart={waiting || hasStarted ? onStartResponse : onStartVoice}
+              onSubmitText={onSubmitText}
+              onAbandon={onAbandon}
+              labels={{
+                toggleAriaLabel: "辩论输入方式",
+                hint: waiting ? "回应反方质询" : "先提交你的立论",
+                textPlaceholder: waiting ? "回应反方刚才的质询…" : "先写下你的立论…",
+                sendAriaLabel: waiting ? "提交回应" : "提交立论",
+                voiceHint: waiting
+                  ? "使用语音回应，实时字幕会显示在这里"
+                  : "使用语音立论，实时字幕会显示在这里",
+                startLabel: waiting || hasStarted ? "开始回应" : "开始立论",
+                recordingLabel: waiting || userTurnCount > 0 ? "本轮回应中" : "立论中",
+                stopLabel: waiting || userTurnCount > 0 ? "停止本轮回应" : "停止本轮立论",
+              }}
+            />
 
             {!recording && (
               <div className="mt-4 flex items-center justify-between gap-2 border-t pt-4">
@@ -673,7 +480,6 @@ export function DebateWorkbench({
                   <Label htmlFor="debate-topic" className="text-xs">辩题</Label>
                   <Textarea id="debate-topic" value={draftTopic} onChange={(event) => onTopicChange(event.target.value)} disabled={active} rows={4} className="min-h-24 resize-none text-xs leading-relaxed" />
                 </div>
-                {!hasStarted && <Button className="w-full" disabled={!llmReady || active || analyzing} onClick={inputMode === "voice" ? onStartVoice : onSubmitText}>{inputMode === "voice" ? <><Mic /> 开始语音立论</> : <><ArrowUp /> 提交文字立论</>}</Button>}
               </CardContent>
             </Card>
 
