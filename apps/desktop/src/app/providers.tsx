@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
 import { useSettingsStore } from "@/state/settingsStore";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const queryClient = new QueryClient({
@@ -79,9 +80,11 @@ function HistorySync({ children }: { children: ReactNode }) {
 export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
-      <SettingsBootstrap>
-        <HistorySync>{children}</HistorySync>
-      </SettingsBootstrap>
+      <TooltipProvider>
+        <SettingsBootstrap>
+          <HistorySync>{children}</HistorySync>
+        </SettingsBootstrap>
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }
