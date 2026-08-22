@@ -62,7 +62,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   load: async () => {
     try {
-      const settings = await api.getSettings();
+      let settings = await api.getSettings();
+      // Ollama 渠道已移除；旧配置自动切回 DeepSeek
+      if (settings.llm.provider === "ollama") {
+        settings = {
+          ...settings,
+          llm: { ...settings.llm, provider: "deepseek" },
+        };
+        void get().save(settings).catch(() => undefined);
+      }
       set({ settings, loaded: true, saveError: null });
     } catch (e) {
       set({

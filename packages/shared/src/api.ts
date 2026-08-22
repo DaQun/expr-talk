@@ -107,11 +107,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
         baseUrl: "https://api.deepseek.com/v1",
         model: "deepseek-chat",
       },
-      ollama: {
-        apiKey: "ollama",
-        baseUrl: "http://localhost:11434/v1",
-        model: "qwen2.5:7b",
-      },
       custom: {
         apiKey: "",
         baseUrl: "",

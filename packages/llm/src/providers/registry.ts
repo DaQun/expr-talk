@@ -2,13 +2,11 @@ import type { LLMProviderInfo } from "@showtalk/shared";
 import type { LLMProvider } from "../types";
 import { openaiLLMProvider } from "./openai";
 import { deepseekLLMProvider } from "./deepseek";
-import { ollamaLLMProvider } from "./ollama";
 import { customLLMProvider } from "./custom";
 
 const providers: LLMProvider[] = [
   openaiLLMProvider,
   deepseekLLMProvider,
-  ollamaLLMProvider,
   customLLMProvider,
 ];
 
@@ -17,5 +15,9 @@ export function listLLMProviders(): LLMProviderInfo[] {
 }
 
 export function getLLMProvider(id: string): LLMProvider | undefined {
-  return providers.find((p) => p.id === id);
+  // 自定义渠道（custom:<slug>）复用 custom 实现
+  const resolved = typeof id === "string" && id.startsWith("custom:")
+    ? "custom"
+    : id;
+  return providers.find((p) => p.id === resolved);
 }

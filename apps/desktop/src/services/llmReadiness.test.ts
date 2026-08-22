@@ -16,10 +16,14 @@ test("allows a configured online provider", () => {
   assert.equal(result.ok, true);
 });
 
-test("allows local Ollama without a remote credential", () => {
+test("allows a local endpoint without a remote credential", () => {
   const settings = structuredClone(DEFAULT_SETTINGS);
-  settings.llm.provider = "ollama";
-  settings.llm.providers.ollama.apiKey = "";
+  settings.llm.provider = "custom";
+  settings.llm.providers.custom = {
+    apiKey: "",
+    baseUrl: "http://localhost:11434/v1",
+    model: "qwen2.5:7b",
+  };
   const result = resolveLlmConfig(settings);
   assert.equal(result.ok, true);
 });

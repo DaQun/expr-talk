@@ -27,12 +27,6 @@ pub fn llm_list_providers() -> Vec<LlmProviderInfo> {
             local: false,
             supports_structured_output: true,
         },
-        LlmProviderInfo {
-            id: "ollama".into(),
-            name: "Ollama (Local)".into(),
-            local: true,
-            supports_structured_output: true,
-        },
     ]
 }
 

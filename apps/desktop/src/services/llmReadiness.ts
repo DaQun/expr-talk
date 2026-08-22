@@ -29,16 +29,16 @@ export function resolveLlmConfig(settings: AppSettings): LlmReady {
   if (isLocal && !model) {
     return {
       ok: false,
-      reason: "本地 Ollama 未填写 model 名称，开始练习前请先完成配置。",
+      reason: "本地服务未填写 model 名称，开始练习前请先完成配置。",
     };
   }
 
   return {
     ok: true,
-    label: `${providerId}${model ? ` · ${model}` : ""}`,
+    label: `${String(providerCfg.name ?? "").trim() || providerId}${model ? ` · ${model}` : ""}`,
     config: {
       providerId,
-      apiKey: apiKey || (isLocal ? "ollama" : undefined),
+      apiKey: apiKey || (isLocal ? "local" : undefined),
       baseUrl: baseUrl || undefined,
       model: model || undefined,
       temperature: 0.3,

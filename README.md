@@ -19,7 +19,7 @@
 | 本地存储 | SQLite（Rust 侧，sessions / settings / utterances） |
 | 本地 ASR | Sherpa-ONNX 流式识别（离线，含中文模型） |
 | 在线 ASR | 阿里云 / 腾讯云 / 火山引擎 / OpenAI 兼容 |
-| 在线 LLM | DeepSeek / OpenAI / Ollama / 自定义（OpenAI 兼容） |
+| 在线 LLM | DeepSeek / OpenAI / 自定义（OpenAI 兼容） |
 
 ## 仓库结构
 
@@ -30,7 +30,7 @@ packages/
   shared/           # 跨包共享类型与常量（训练模式 / 评分 / 主题）
   core/             # 确定性指标 / 规则反馈 / 教练引擎
   asr/              # ASR Provider 抽象与实现（本地 sherpa + 在线）
-  llm/              # LLM Provider 抽象与实现（deepseek / openai / ollama / custom）
+  llm/              # LLM Provider 抽象与实现（deepseek / openai / custom）
   storage/          # SQLite schema / repository
 docs/
   architecture.md               # 架构设计文档
