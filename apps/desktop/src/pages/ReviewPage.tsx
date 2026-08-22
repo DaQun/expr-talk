@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowDown,
+  ArrowUp,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -9,6 +11,8 @@ import {
   Info,
   LoaderCircle,
   Sparkles,
+  TrendingUp,
+  Trophy,
   XCircle,
 } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -30,6 +34,13 @@ import {
 import { useSessionStore } from "@/state/sessionStore";
 import { ComparisonCard } from "@/components/ComparisonCard";
 import { ConversationTimeline } from "@/components/ConversationTimeline";
+import { DiffText } from "@/components/DiffText";
+import {
+  HighlightCard,
+  type HighlightItem,
+} from "@/components/HighlightCard";
+import { DimensionRadarChart } from "@/components/charts/DimensionRadarChart";
+import { TrendLineChart } from "@/components/charts/TrendLineChart";
 import {
   buildEmptyTranscriptGuidance,
   GuidancePanel,
@@ -43,8 +54,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useElapsedSeconds } from "@/hooks/useElapsedSeconds";
+import {
+  buildTrendData,
+  checkHistoricalBest,
+} from "@/utils/chartHelpers";
 
 const DIMENSION_LABELS: Record<EvaluationDimensionKey, string> = {
   content: "内容质量",
@@ -169,6 +196,61 @@ function buildComparisonHighlights(
   return items.slice(0, 3);
 }
 
+type HighlightInput = {
+  scoredDimensions: Array<{ key: EvaluationDimensionKey; label: string; score: number }>;
+  cmp: AttemptComparison | null;
+  overallScore: number | undefined;
+  isHistoricalBest: boolean;
+};
+
+/** 正向激励：最强维度、最大进步、历史最佳，全部来自已有数据。 */
+function buildHighlightItems({
+  scoredDimensions,
+  cmp,
+  overallScore,
+  isHistoricalBest,
+}: HighlightInput): HighlightItem[] {
+  const highlights: HighlightItem[] = [];
+
+  const topDimension = scoredDimensions
+    .slice()
+    .sort((a, b) => b.score - a.score)[0];
+  if (topDimension && topDimension.score >= 80) {
+    highlights.push({
+      icon: <Trophy className="size-5" />,
+      title: "最强维度",
+      value: `${topDimension.label} ${topDimension.score}分`,
+      badge: "优秀表现",
+    });
+  }
+
+  if (cmp && cmp.improved) {
+    const numericDeltas = Object.values(cmp.deltas).filter(
+      (v): v is number => typeof v === "number",
+    );
+    const maxDelta = numericDeltas.length > 0 ? Math.max(...numericDeltas) : 0;
+    if (maxDelta > 0) {
+      highlights.push({
+        icon: <TrendingUp className="size-5" />,
+        title: "最大进步",
+        value: `+${maxDelta.toFixed(1)}`,
+        badge: "本轮突破",
+      });
+    }
+  }
+
+  if (isHistoricalBest && overallScore != null) {
+    highlights.push({
+      icon: <Sparkles className="size-5" />,
+      title: "创历史新高",
+      value: `综合分 ${overallScore}`,
+      badge: "里程碑",
+    });
+  }
+
+  return highlights;
+}
+
 function formatComparisonNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
@@ -220,6 +302,7 @@ function rangeStatus(
 
 export function ReviewPage() {
   const { sessionId } = useParams();
+  const navigate = useNavigate();
   const {
     current,
     report,
@@ -233,17 +316,16 @@ export function ReviewPage() {
     modelStatus,
     refreshModelStatus,
     reanalyzeSession,
+    startRetry,
   } = useSessionStore();
 
-  const [showDetails, setShowDetails] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
   const [showAllEvidence, setShowAllEvidence] = useState(false);
-  const [showTranscript, setShowTranscript] = useState(false);
-  const [showAudio, setShowAudio] = useState(false);
   const [showAllSignals, setShowAllSignals] = useState(false);
   const [showSecondaryIssues, setShowSecondaryIssues] = useState(false);
-  const [showComparisonDetail, setShowComparisonDetail] = useState(false);
   const [showLogicReview, setShowLogicReview] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [openDimension, setOpenDimension] = useState<
     EvaluationDimensionKey | null | undefined
   >(undefined);
@@ -262,17 +344,22 @@ export function ReviewPage() {
     setShowAllEvidence(false);
     setShowAllSignals(false);
     setShowSecondaryIssues(false);
-    setShowComparisonDetail(false);
     setShowLogicReview(false);
-    setShowDetails(false);
-    setShowTranscript(false);
-    setShowAudio(false);
+    setActiveTab("overview");
   }, [current?.id]);
 
   const profileQuery = useQuery({
     queryKey: ["profile"],
     queryFn: () => api.getProfile(),
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    enabled: Boolean(current && report),
+  });
+
+  const historyQuery = useQuery({
+    queryKey: ["session-history", current?.id],
+    queryFn: () => api.listHistory({ limit: 10 }),
+    staleTime: 60_000,
     refetchOnWindowFocus: false,
     enabled: Boolean(current && report),
   });
@@ -348,12 +435,27 @@ export function ReviewPage() {
     ? buildComparisonHighlights(cmp, currentPaceRange)
     : [];
 
+  async function handleDirectRetry() {
+    if (!current || retrying) return;
+    setRetrying(true);
+    try {
+      const started = await startRetry(current.id);
+      navigate(started ? "/practice" : `/retry/${current.id}`);
+    } finally {
+      setRetrying(false);
+    }
+  }
+
   function scrollToEvidence(index: number) {
     if (index >= 3) setShowAllEvidence(true);
+    setActiveTab("feedback");
+    // 双 rAF：等 Tab 切换 + 展开列表渲染完再滚动，避免滚到旧布局位置
     window.requestAnimationFrame(() => {
-      document
-        .getElementById(`evidence-item-${index}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById(`evidence-item-${index}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
     });
   }
 
@@ -621,6 +723,19 @@ export function ReviewPage() {
     .slice()
     .sort((a, b) => a.score - b.score)[0];
   const lowestDimensionKey = weakestDimension?.key;
+  /** 趋势与亮点是纯派生计算（不需要 memo）；注意必须在所有 hooks 之后、但此处位于条件 return 之后，
+   *  因此不能使用 useMemo/useCallback 等 hooks，否则加载态与完成态渲染的 hooks 数量不一致。 */
+  const trendPoints = buildTrendData(historyQuery.data ?? [], { limit: 10 });
+  const isHistoricalBest = checkHistoricalBest(
+    overallScore,
+    trendPoints.filter((p) => p.id !== current.id),
+  );
+  const highlights = buildHighlightItems({
+    scoredDimensions,
+    cmp,
+    overallScore,
+    isHistoricalBest,
+  });
   const effectiveOpenDimension =
     openDimension === undefined ? lowestDimensionKey : openDimension;
   const totalChars = metrics?.totalChars ?? 0;
@@ -848,7 +963,7 @@ export function ReviewPage() {
     : evidenceItems.slice(0, 3);
   const transcriptText = current.finalTranscript ?? "";
   const transcriptSegments =
-    showTranscript && transcriptText.trim()
+    transcriptText.trim()
       ? highlightTranscript(
           transcriptText,
           evidenceItems.map((item) => item.original),
@@ -872,6 +987,7 @@ export function ReviewPage() {
         : ("warning" as const);
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div>
       <PageHeader
         title="复盘"
@@ -954,12 +1070,12 @@ export function ReviewPage() {
               type="button"
               className="text-primary ml-auto text-xs hover:underline"
               onClick={() => {
-                setShowComparisonDetail(true);
-                window.requestAnimationFrame(() => {
+                setActiveTab("overview");
+                window.setTimeout(() => {
                   document
                     .getElementById("comparison-detail")
                     ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                });
+                }, 80);
               }}
             >
               查看对比详情
@@ -981,7 +1097,27 @@ export function ReviewPage() {
         )}
 
         {/* ① 下一步：唯一行动区 */}
-        <Card className="surface-hero border-primary/25">
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="w-full"
+        >
+          <TabsList className="overflow-x-auto sm:inline-flex">
+            <TabsTrigger value="overview">总览</TabsTrigger>
+            <TabsTrigger value="details">诊断明细</TabsTrigger>
+            <TabsTrigger value="feedback">改写建议</TabsTrigger>
+            <TabsTrigger value="materials">原始材料</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview">
+            <HighlightCard highlights={highlights} />
+            {cmp && (
+              <div id="comparison-detail" className="scroll-mt-6">
+                <ComparisonCard comparison={cmp} paceRange={modePaceRange} />
+              </div>
+            )}
+
+            <Card className="surface-hero border-primary/25">
           <CardHeader className="pb-2">
             <div className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
               下一步 · 只改这一点
@@ -1084,11 +1220,19 @@ export function ReviewPage() {
                   </ul>
                 </div>
               )}
-              <Button asChild className="mt-auto w-fit">
-                <Link to={hasTranscript ? `/retry/${current.id}` : "/practice"}>
-                  {hasTranscript ? "开始同题复练" : "回练习页补救"}
-                </Link>
-              </Button>
+              {hasTranscript ? (
+                <Button
+                  className="mt-auto w-fit"
+                  disabled={retrying || analyzing}
+                  onClick={() => void handleDirectRetry()}
+                >
+                  {retrying ? "正在准备复练…" : "开始同题复练"}
+                </Button>
+              ) : (
+                <Button asChild className="mt-auto w-fit">
+                  <Link to="/practice">回练习页补救</Link>
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -1096,26 +1240,66 @@ export function ReviewPage() {
         {/* ② 成绩条：综合分 + 精简本地指标，单一口径 */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg">成绩</CardTitle>
+            <CardTitle className="text-lg">成绩概览</CardTitle>
+            <p className="text-muted-foreground m-0 text-sm">
+              综合分由五维得分平均；语速与填充词为本地实测。完整对比见上方「五维雷达图」。
+            </p>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed">
               {report.summary}
             </p>
-            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-[repeat(auto-fit,minmax(120px,1fr))]">
-              <div className="min-w-0 bg-card px-3 py-2.5">
-                <div className="text-muted-foreground truncate text-xs">
-                  综合分
+            <div className="border-success/20 bg-success/5 flex flex-wrap items-end justify-between gap-3 rounded-lg border px-4 py-3.5">
+              <div className="flex items-end gap-3">
+                <div>
+                  <div className="text-muted-foreground text-xs">综合分</div>
+                  <div className="mt-0.5 text-5xl leading-none font-bold tabular-nums">
+                    {overallScore ?? "--"}
+                  </div>
                 </div>
-                <div className="mt-0.5 text-lg font-semibold tabular-nums">
-                  {overallScore ?? "--"}
-                </div>
-                {weakestDimension && (
-                  <div className="text-muted-foreground mt-0.5 truncate text-[0.7rem]">
+                {cmp && (
+                  <div className="flex flex-col gap-0.5 pb-1">
+                    <div className="flex items-center gap-1 text-xs font-medium">
+                      {cmp.improved ? (
+                        <>
+                          <ArrowUp className="text-success size-3.5" />
+                          <span className="text-success">本轮进步</span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowDown className="text-destructive size-3.5" />
+                          <span className="text-destructive">待改善</span>
+                        </>
+                      )}
+                    </div>
+                    {weakestDimension && (
+                      <div className="text-muted-foreground text-[0.7rem]">
+                        最弱 · {weakestDimension.label} {weakestDimension.score}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!cmp && weakestDimension && (
+                  <div className="text-muted-foreground pb-1 text-[0.7rem]">
                     最弱 · {weakestDimension.label} {weakestDimension.score}
                   </div>
                 )}
               </div>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-muted-foreground">密度分</span>
+                  {cmp ? (
+                    <span className="tabular-nums">
+                      {formatComparisonNumber(cmp.before.densityScore)} → {formatComparisonNumber(cmp.after.densityScore)}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">首次练习</span>
+                  )}
+                </div>
+                <Progress value={overallScore ?? 0} className="h-2.5 w-40" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-[repeat(auto-fit,minmax(120px,1fr))]">
               {taskChecks.length > 0 && (
                 <button
                   type="button"
@@ -1150,9 +1334,16 @@ export function ReviewPage() {
                     <span className="text-base font-semibold tabular-nums">
                       {signal.value}
                     </span>
-                    <Badge variant={signalStatusVariant(signal.status)}>
-                      {signal.status}
-                    </Badge>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Badge variant={signalStatusVariant(signal.status)}>
+                          {signal.status}
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <p className="m-0">{signal.detail}</p>
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                 </div>
               ))}
@@ -1219,13 +1410,51 @@ export function ReviewPage() {
           </CardContent>
         </Card>
 
-        {/* 对话时间线：辩论 / 费曼多轮对照（有 turns 才出） */}
-        {current.debate && current.debate.turns.length > 0 && (
-          <ConversationTimeline
-            debate={current.debate}
-            mode={normalizedMode}
-          />
-        )}
+        {/* 近期趋势：最近几次练习的得分变化 */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg">近期趋势</CardTitle>
+                <p className="text-muted-foreground m-0 text-sm">
+                  最近 {trendPoints.length} 次有效练习的综合分与填充词率
+                </p>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                {trendPoints.length >= 2 ? (
+                  <TrendLineChart
+                    data={trendPoints}
+                    lines={[
+                      { dataKey: "overall", name: "综合分", color: "--chart-1" },
+                      { dataKey: "fillerRate", name: "填充词/百字", color: "--chart-2", yAxisId: "right" },
+                    ]}
+                  />
+                ) : (
+                  <p className="text-muted-foreground m-0 text-sm">
+                    数据不足：至少完成 2 次有效练习后才能绘制趋势。
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="details">
+            {scoredDimensions.length >= 2 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg">五维雷达图</CardTitle>
+                  <p className="text-muted-foreground m-0 text-sm">
+                    各维度得分分布，同心圆越大越好
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <DimensionRadarChart
+                    data={scoredDimensions.map((item) => ({
+                      label: item.label,
+                      score: item.score,
+                    }))}
+                  />
+                </CardContent>
+              </Card>
+            )}
 
         {/* ③ 诊断明细：五维唯一成绩口径；题目清单只在「场景任务」内 */}
         {dimensionItems.length > 0 && (
@@ -1333,6 +1562,10 @@ export function ReviewPage() {
           </Card>
         )}
 
+        </TabsContent>
+
+          <TabsContent value="feedback">
+
         {/* ④ 怎么改：原句 vs 建议 */}
         {hasTranscript && evidenceItems.length > 0 && (
           <Card>
@@ -1373,10 +1606,18 @@ export function ReviewPage() {
                     <div className="text-muted-foreground text-xs font-medium">
                       建议表达
                     </div>
-                    <p className="mt-1 mb-0 whitespace-pre-wrap text-sm leading-relaxed">
-                      {item.rewritten ??
-                        "暂无对应改写，可先按左侧问题精简原句。"}
-                    </p>
+                    {item.rewritten ? (
+                      <div className="mt-1">
+                        <DiffText
+                          original={item.original}
+                          rewritten={item.rewritten}
+                        />
+                      </div>
+                    ) : (
+                      <p className="mt-1 mb-0 whitespace-pre-wrap text-sm leading-relaxed">
+                        暂无对应改写，可先按左侧问题精简原句。
+                      </p>
+                    )}
                     {item.focus && item.focus !== item.problem && (
                       <p className="text-muted-foreground mt-2 mb-0 text-xs">
                         改写重点：{item.focus}
@@ -1477,79 +1718,43 @@ export function ReviewPage() {
           </Card>
         )}
 
+        </TabsContent>
+
+          <TabsContent value="materials">
+            {current.debate && current.debate.turns.length > 0 && (
+              <ConversationTimeline
+                debate={current.debate}
+                mode={normalizedMode}
+              />
+            )}
+
         {/* ⑥ 逐字稿 / 录音：有时间线时不重复列分轮录音，只保留全文高亮与重转写 */}
         {(hasTranscript || audioMaterials.length > 0 || hasAudio) && (
           <Card>
-            <CardHeader className="pb-0">
-              <button
-                type="button"
-                className="flex w-full items-center justify-between text-left text-[0.95rem] font-semibold"
-                onClick={() => {
-                  setShowDetails((v) => {
-                    const next = !v;
-                    if (next) {
-                      setShowTranscript(true);
-                      if (!audioCoveredByTimeline && audioMaterials.length > 0) {
-                        setShowAudio(true);
-                      }
-                    }
-                    return next;
-                  });
-                }}
-                aria-expanded={showDetails}
-              >
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">
                 {hasConversationTimeline ? "整篇逐字稿" : "原始材料"}
-                <span className="text-muted-foreground flex items-center gap-1 text-sm font-normal">
-                  {hasConversationTimeline
-                    ? "高亮可跳改写"
-                    : audioMaterials.length > 0
-                      ? "逐字稿 · 录音"
-                      : "逐字稿"}
-                  {showDetails ? (
-                    <ChevronUp className="size-4" />
-                  ) : (
-                    <ChevronDown className="size-4" />
-                  )}
-                </span>
-              </button>
+              </CardTitle>
+              <p className="text-muted-foreground m-0 text-xs">
+                {hasConversationTimeline
+                  ? "分轮对话见上方时间线；此处为合并全文，标黄可跳改写。"
+                  : audioMaterials.length > 0
+                    ? "逐字稿 · 录音"
+                    : "逐字稿"}
+              </p>
             </CardHeader>
-            {showDetails && (
-              <CardContent className="flex flex-col gap-4 pt-4">
+            <CardContent className="flex flex-col gap-4 pt-1">
                 {hasConversationTimeline && audioCoveredByTimeline && (
                   <p className="text-muted-foreground m-0 text-xs leading-relaxed">
                     分轮发言与录音见上方「对话时间线」。此处为合并全文，便于对照改写高亮。
                   </p>
                 )}
 
-                {!hasConversationTimeline && (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowTranscript((v) => !v)}
-                    >
-                      {showTranscript ? "收起逐字稿" : "查看逐字稿"}
-                    </Button>
-                    {audioMaterials.length > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowAudio((v) => !v)}
-                      >
-                        {showAudio
-                          ? "收起录音"
-                          : `查看录音${audioMaterials.length > 1 ? `（${audioMaterials.length}）` : ""}`}
-                      </Button>
-                    )}
-                    {!audioApi.isTauri() && (
-                      <span className="text-muted-foreground self-center text-xs">
-                        浏览器模式
-                      </span>
-                    )}
-                  </div>
+                {!audioApi.isTauri() && !hasConversationTimeline && (
+                  <span className="text-muted-foreground text-xs">浏览器模式</span>
                 )}
 
-                {(showTranscript || hasConversationTimeline) && (
+                {(hasTranscript || hasConversationTimeline) && (
                   <div className="rounded-lg border border-border px-4 py-3">
                     {!hasConversationTimeline && (
                       <h3 className="mt-0 mb-3 text-base font-semibold">
@@ -1589,7 +1794,7 @@ export function ReviewPage() {
                   </div>
                 )}
 
-                {showAudio && audioMaterials.length > 0 && (
+                {audioMaterials.length > 0 && (
                   <div className="flex flex-col gap-3 rounded-lg border border-border px-4 py-3">
                     <h3 className="m-0 text-base font-semibold">录音素材</h3>
                     <div className="flex flex-col gap-3">
@@ -1663,38 +1868,11 @@ export function ReviewPage() {
                   </Button>
                 )}
               </CardContent>
-            )}
           </Card>
         )}
 
-        {/* 复练对比详情：顶条摘要 + 此处按需展开，避免两处同时铺开 */}
-        {cmp && (
-          <div id="comparison-detail" className="scroll-mt-6">
-            {showComparisonDetail ? (
-              <div className="flex flex-col gap-2">
-                <div className="flex justify-end">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowComparisonDetail(false)}
-                  >
-                    收起对比详情
-                  </Button>
-                </div>
-                <ComparisonCard comparison={cmp} paceRange={modePaceRange} />
-              </div>
-            ) : comparisonHighlights.length === 0 ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-fit"
-                onClick={() => setShowComparisonDetail(true)}
-              >
-                查看复练对比详情
-              </Button>
-            ) : null}
-          </div>
-        )}
+        </TabsContent>
+        </Tabs>
 
         {error && (
           <div className="bg-destructive/10 text-destructive border-destructive/30 rounded-lg border px-3.5 py-3 text-sm">
@@ -1703,5 +1881,6 @@ export function ReviewPage() {
         )}
       </div>
     </div>
+    </TooltipProvider>
   );
 }

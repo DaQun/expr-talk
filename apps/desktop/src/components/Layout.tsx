@@ -40,6 +40,18 @@ const links = [
 export function Layout() {
   const recording = useSessionStore((s) => s.current?.status === "recording");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  const [navBlockedHint, setNavBlockedHint] = useState<string | null>(null);
+
+  function handleBlockedNav(label: string, event: React.MouseEvent) {
+    event.preventDefault();
+    setNavBlockedHint(`录音进行中，请先停止或放弃本次练习，再前往「${label}」。`);
+  }
+
+  useEffect(() => {
+    if (!navBlockedHint) return;
+    const t = window.setTimeout(() => setNavBlockedHint(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [navBlockedHint]);
 
   function toggleSidebar() {
     setSidebarCollapsed((collapsed) => {
@@ -149,7 +161,7 @@ export function Layout() {
                 tabIndex={blocked ? -1 : undefined}
                 title={sidebarCollapsed ? link.label : undefined}
                 onClick={(event) => {
-                  if (blocked) event.preventDefault();
+                  if (blocked) handleBlockedNav(link.label, event);
                 }}
                 className={({ isActive }) =>
                   cn(
@@ -158,7 +170,7 @@ export function Layout() {
                     "hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground",
                     isActive &&
                       "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
-                    blocked && "pointer-events-none opacity-40",
+                    blocked && "cursor-not-allowed opacity-40",
                   )
                 }
               >
@@ -186,6 +198,15 @@ export function Layout() {
             );
           })}
         </nav>
+
+        {navBlockedHint && (
+          <p
+            role="status"
+            className="border-warning/30 bg-warning/10 text-warning animate-in fade-in slide-in-from-bottom-1 m-0 rounded-lg border px-3 py-2 text-xs leading-relaxed duration-150"
+          >
+            {navBlockedHint}
+          </p>
+        )}
 
         <div
           className={cn(

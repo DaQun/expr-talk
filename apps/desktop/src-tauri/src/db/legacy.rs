@@ -142,6 +142,7 @@ fn symlink_to(target: &Path, dest: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use rusqlite::params;
+    use std::path::PathBuf;
 
     fn temp_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

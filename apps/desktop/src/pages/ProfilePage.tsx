@@ -22,6 +22,11 @@ import { MetricBadge } from "@/components/MetricBadge";
 import { PageHeader } from "@/components/ui/page-header";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const TREND_LABELS = {
   improving: "正在改善",
@@ -153,10 +158,23 @@ export function ProfilePage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <MetricBadge
-          label="有效评审"
-          value={`${data.reviewedSessionCount} 次`}
-        />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="min-w-0">
+              <MetricBadge
+                emphasize
+                label="有效评审"
+                value={`${data.reviewedSessionCount} 次`}
+              />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>
+            共开始 {data.attemptCount} 次，完成 {data.sessionCount} 次
+            {data.interruptedSessionCount > 0 &&
+              `，其中 ${data.interruptedSessionCount} 次中断或失败，未计入成长指标`}
+            。
+          </TooltipContent>
+        </Tooltip>
         <MetricBadge
           label="复练成功率"
           value={
@@ -169,16 +187,6 @@ export function ProfilePage() {
         />
         <MetricBadge label="近 30 天活跃" value={`${data.activeDays30} 天`} />
       </div>
-
-      {(data.attemptCount > data.sessionCount || data.interruptedSessionCount > 0) && (
-        <p className="text-muted-foreground mt-3 mb-0 text-xs">
-          共开始 {data.attemptCount} 次，完成 {data.sessionCount} 次
-          {data.interruptedSessionCount > 0
-            ? `，其中 ${data.interruptedSessionCount} 次中断或失败未计入成长指标`
-            : ""}
-          。
-        </p>
-      )}
 
       <Card className="border-primary/25">
         <CardHeader>
@@ -224,33 +232,78 @@ export function ProfilePage() {
             <CardTitle className="text-base">分模式能力</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
-            {data.modeAbilities.map((ability) => (
-              <div key={ability.mode}>
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <strong className="text-sm">
-                    {PRACTICE_MODE_LABELS[ability.mode]}
-                  </strong>
-                  <span className="text-muted-foreground text-xs">
-                    {ability.sessionCount} 次样本
-                  </span>
-                </div>
-                <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
-                  {Object.entries(ability.scores).map(([key, value]) => (
-                    <div key={key}>
-                      <div className="mb-1.5 flex justify-between text-xs">
-                        <span className="text-muted-foreground">
-                          {SCORE_DIMENSION_LABELS[key as ScoreDimension]}
-                        </span>
-                        <span className="font-medium tabular-nums">
-                          {value}
-                        </span>
+            {data.modeAbilities.map((ability) => {
+              const entries = Object.entries(ability.scores) as [
+                ScoreDimension,
+                number,
+              ][];
+              const average = Math.round(
+                entries.reduce((sum, [, value]) => sum + value, 0) /
+                  entries.length,
+              );
+              const strongest = entries.reduce((a, b) =>
+                b[1] > a[1] ? b : a,
+              );
+              const weakest = entries.reduce((a, b) => (b[1] < a[1] ? b : a));
+              return (
+                <div key={ability.mode}>
+                  <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
+                    <strong className="text-sm">
+                      {PRACTICE_MODE_LABELS[ability.mode]}
+                      <span className="ml-2 font-semibold tabular-nums">
+                        {average}
+                      </span>
+                    </strong>
+                    <span className="text-muted-foreground text-xs">
+                      {ability.sessionCount} 次样本
+                    </span>
+                  </div>
+                  <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
+                    {(
+                      [
+                        ["最弱", weakest],
+                        ["最强", strongest],
+                      ] as [string, [ScoreDimension, number]][]
+                    ).map(([tag, [key, value]]) => (
+                      <div key={key}>
+                        <div className="mb-1.5 flex justify-between text-xs">
+                          <span className="text-muted-foreground">
+                            {SCORE_DIMENSION_LABELS[key]}
+                            <span className="text-muted-foreground/70 ml-1.5">
+                              {tag}
+                            </span>
+                          </span>
+                          <span className="font-medium tabular-nums">
+                            {value}
+                          </span>
+                        </div>
+                        <Progress value={value} />
                       </div>
-                      <Progress value={value} />
+                    ))}
+                  </div>
+                  <details className="group mt-3">
+                    <summary className="text-muted-foreground cursor-pointer text-xs select-none">
+                      全部维度
+                    </summary>
+                    <div className="mt-3 grid gap-x-5 gap-y-3 sm:grid-cols-2">
+                      {entries.map(([key, value]) => (
+                        <div key={key}>
+                          <div className="mb-1.5 flex justify-between text-xs">
+                            <span className="text-muted-foreground">
+                              {SCORE_DIMENSION_LABELS[key]}
+                            </span>
+                            <span className="font-medium tabular-nums">
+                              {value}
+                            </span>
+                          </div>
+                          <Progress value={value} />
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </details>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
       )}
@@ -289,9 +342,8 @@ export function ProfilePage() {
                         {TREND_LABELS[issue.trend]}
                       </Badge>
                     </div>
-                    <p className="text-muted-foreground mt-1.5 mb-0 text-xs">
-                      出现 {issue.count} 次 · 占有效练习 {issue.sessionRate}% ·
-                      最近 {formatDate(issue.lastSeenAt)}
+                    <p className="text-muted-foreground/70 mt-1.5 mb-0 text-xs">
+                      出现 {issue.count} 次 · 最近 {formatDate(issue.lastSeenAt)}
                     </p>
                   </div>
                 </div>

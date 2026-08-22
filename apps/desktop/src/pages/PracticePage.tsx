@@ -79,13 +79,19 @@ export function PracticePage() {
 
   const [seconds, setSeconds] = useState(0);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [discardError, setDiscardError] = useState<string | null>(null);
   const [topicCategory, setTopicCategory] = useState("全部");
-  const [topicId, setTopicId] = useState<string | null>(null);
   const recording = current?.status === "recording";
   const debateMode = draftMode === "debate";
   const feynmanMode = draftMode === "feynman";
   const interactiveMode = debateMode || feynmanMode;
   const debateWaiting = interactiveMode && current?.status === "debating";
+  // 费曼配置：会话进行中一律使用会话内快照，全局 draft 只表示“下一场”
+  const sessionFeynman =
+    current?.mode === "feynman" ? current.debate?.feynman : undefined;
+  const effectiveLearnerRole = sessionFeynman?.learnerRole ?? feynmanLearnerRole;
+  const effectiveDifficulty = sessionFeynman?.difficulty ?? feynmanDifficulty;
   const levelPct = Math.min(100, Math.round(level * 400));
   const llmReadiness = settingsLoaded
     ? resolveLlmConfig(settings)
@@ -104,14 +110,10 @@ export function PracticePage() {
     }
   }
 
+  // 文字提交的两种语义（按钮文案已在各工作台按状态区分）：
+  // 交互模式等待回应时提交文字回应；否则提交粘贴文本做整段复盘。
+  // 录音中无文字入口（输入区被隐藏），故无需处理 recording 分支。
   async function handlePasteSubmit() {
-    if (recording) {
-      const shouldReview = await stopAndAnalyze();
-      const id = useSessionStore.getState().current?.id;
-      if (shouldReview) navigate(id ? `/review/${id}` : "/review");
-      return;
-    }
-
     if (debateWaiting) {
       const shouldReview = await submitDebateText();
       if (shouldReview) {
@@ -122,8 +124,11 @@ export function PracticePage() {
     }
 
     await analyzePaste();
-    if (useSessionStore.getState().current?.status === "debating") return;
-    const id = useSessionStore.getState().current?.id;
+    const state = useSessionStore.getState();
+    // 分析失败（如大模型未就绪/逐字稿为空）时留在本页展示错误，不跳进复盘
+    if (state.error) return;
+    if (state.current?.status === "debating") return;
+    const id = state.current?.id;
     navigate(id ? `/review/${id}` : "/review");
   }
 
@@ -143,10 +148,11 @@ export function PracticePage() {
     setTopicCategory("全部");
   }, [draftMode]);
 
-  useEffect(() => {
-    const match = modeTopics.find((t) => t.prompt === draftTopic);
-    setTopicId(match?.id ?? null);
-  }, [draftTopic, modeTopics]);
+  // 单一数据源：draftTopic。topicId 纯派生（与题库 prompt 完全匹配时才高亮对应项）
+  const topicId = useMemo(
+    () => modeTopics.find((t) => t.prompt === draftTopic)?.id ?? null,
+    [draftTopic, modeTopics],
+  );
 
   // 启动时若 store 仍是旧 mode id，归一成 free/short_video/debate/feynman
   useEffect(() => {
@@ -168,21 +174,67 @@ export function PracticePage() {
 
   useEffect(() => {
     if (!confirmDiscard) return;
+
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !analyzing) setConfirmDiscard(false);
+      if (event.key === "Escape" && !analyzing && !discarding) setConfirmDiscard(false);
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [confirmDiscard, analyzing]);
+  }, [confirmDiscard, analyzing, discarding]);
+
+  // 空格键开始/停止；输入控件聚焦时不抢占
+  useEffect(() => {
+    const toggle = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || event.repeat) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.closest("input, textarea, select, [contenteditable]") ||
+          target.isContentEditable ||
+          target.closest('[role="dialog"], [role="alertdialog"]'))
+      ) {
+        return;
+      }
+      if (analyzing || confirmDiscard) return;
+      if (recording) {
+        event.preventDefault();
+        void (async () => {
+          const shouldReview = await stopAndAnalyze();
+          const id = useSessionStore.getState().current?.id;
+          if (shouldReview) navigate(id ? `/review/${id}` : "/review");
+        })();
+        return;
+      }
+      if (!llmReady) return;
+      if (debateWaiting) {
+        event.preventDefault();
+        void startDebateResponse();
+        return;
+      }
+      if (!current) {
+        event.preventDefault();
+        void createAndStart();
+      }
+    };
+    window.addEventListener("keydown", toggle);
+    return () => window.removeEventListener("keydown", toggle);
+  }, [
+    recording,
+    analyzing,
+    confirmDiscard,
+    llmReady,
+    debateWaiting,
+    current,
+    stopAndAnalyze,
+    startDebateResponse,
+    createAndStart,
+    navigate,
+  ]);
 
   function selectTopic(id: string) {
-    if (id === "custom") {
-      setTopicId(null);
-      return;
-    }
+    if (id === "custom") return; // 保留已输入文本；topicId 不再与题库匹配即视为自定义
     const topic = modeTopics.find((item) => item.id === id);
     if (!topic) return;
-    setTopicId(topic.id);
     setDraftTopic(topic.prompt);
   }
 
@@ -210,7 +262,7 @@ export function PracticePage() {
           className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4 backdrop-blur-[2px]"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !analyzing) {
+            if (event.target === event.currentTarget && !analyzing && !discarding) {
               setConfirmDiscard(false);
             }
           }}
@@ -231,10 +283,18 @@ export function PracticePage() {
             >
               本次未完成的讲解、提问、录音和字幕都会被丢弃，不会生成复盘报告。题目仍会保留。
             </p>
+            {discardError && (
+              <p
+                role="alert"
+                className="text-destructive mt-3 mb-0 text-sm leading-relaxed"
+              >
+                {discardError}
+              </p>
+            )}
             <div className="mt-5 flex justify-end gap-2">
               <Button
                 variant="secondary"
-                disabled={analyzing}
+                disabled={analyzing || discarding}
                 autoFocus
                 onClick={() => setConfirmDiscard(false)}
               >
@@ -242,15 +302,25 @@ export function PracticePage() {
               </Button>
               <Button
                 variant="destructive"
-                disabled={analyzing}
+                disabled={analyzing || discarding}
                 onClick={() => {
                   void (async () => {
-                    await discardRecording();
-                    setConfirmDiscard(false);
+                    setDiscarding(true);
+                    setDiscardError(null);
+                    try {
+                      await discardRecording();
+                      setConfirmDiscard(false);
+                    } catch (e) {
+                      setDiscardError(
+                        e instanceof Error ? e.message : "放弃失败，请重试。",
+                      );
+                    } finally {
+                      setDiscarding(false);
+                    }
                   })();
                 }}
               >
-                确认放弃
+                {discarding ? "正在丢弃…" : "确认放弃"}
               </Button>
             </div>
           </div>
@@ -283,7 +353,6 @@ export function PracticePage() {
     onTopicSelect: selectTopic,
     onTopicChange: (topic: string) => {
       setDraftTopic(topic);
-      setTopicId(null);
     },
     onPasteTextChange: setPasteText,
     onStartVoice: () => void createAndStart(),
@@ -298,8 +367,8 @@ export function PracticePage() {
         waiting={debateWaiting}
         streamedQuestion={streamedQuestion}
         streamedReasoning={streamedReasoning}
-        learnerRole={feynmanLearnerRole}
-        difficulty={feynmanDifficulty}
+        learnerRole={effectiveLearnerRole}
+        difficulty={effectiveDifficulty}
         onLearnerRoleChange={setFeynmanLearnerRole}
         onDifficultyChange={setFeynmanDifficulty}
         onStartResponse={() => void startDebateResponse()}

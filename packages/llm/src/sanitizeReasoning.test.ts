@@ -39,3 +39,32 @@ test("returns empty when reasoning is pure meta", () => {
   assert.equal(sanitizeDisplayReasoning("输出JSON"), "");
   assert.equal(sanitizeDisplayReasoning("只输出合法 JSON，不要 Markdown"), "");
 });
+
+test("drops meta-instruction lines in the middle of reasoning", () => {
+  const input = [
+    "用户观点缺少论据支撑。",
+    "根据系统提示需要追问",
+    "因此下一轮质询应聚焦因果链。",
+  ].join("\n");
+  const cleaned = sanitizeDisplayReasoning(input);
+  assert.equal(cleaned, "用户观点缺少论据支撑。\n因此下一轮质询应聚焦因果链。");
+});
+
+test("drops role-echo and task-confirmation lines", () => {
+  const input = [
+    "我需要扮演反方提出质询",
+    "用户的核心漏洞是没有区分『可选』和『默认』。",
+    "先理解用户要求",
+    "这一轮就从默认带来的成本切入。",
+  ].join("\n");
+  const cleaned = sanitizeDisplayReasoning(input);
+  assert.equal(
+    cleaned,
+    "用户的核心漏洞是没有区分『可选』和『默认』。\n这一轮就从默认带来的成本切入。",
+  );
+});
+
+test("collapses blank-line runs left by filtering", () => {
+  const input = "第一句。\n\n\n只输出 JSON\n\n\n第二句。";
+  assert.equal(sanitizeDisplayReasoning(input), "第一句。\n\n第二句。");
+});

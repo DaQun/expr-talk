@@ -1,6 +1,7 @@
 /**
- * SQLite 连接将由 Tauri Rust 侧持有。
- * 本模块提供 TS 侧 repository 接口与内存实现，便于前端开发与单测。
+ * 生产环境唯一数据源：Tauri Rust 侧 SQLite（src-tauri/src/db/，schema 版本化迁移）。
+ * 本包仅在浏览器开发环境（无 Tauri IPC）下提供 InMemoryDb 内存后备与 repository 接口。
+ * 注意：schema/列变更必须改 Rust 侧版本化迁移，本包不承载真实迁移逻辑。
  */
 
 export type SqlValue = string | number | null;

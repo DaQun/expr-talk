@@ -7,6 +7,9 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "react-is": "^19.1.0"
+  },
   "scripts": {
     "dev": "npm run dev -w @showtalk/desktop",
     "build": "npm run build -w @showtalk/desktop",
