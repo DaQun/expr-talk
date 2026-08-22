@@ -74,7 +74,7 @@ export function Layout() {
   return (
     <div
       className={cn(
-        "grid min-h-screen bg-background transition-[grid-template-columns] duration-200 md:grid-cols-[216px_minmax(0,1fr)]",
+        "grid min-h-screen grid-cols-1 bg-background transition-[grid-template-columns] duration-200 md:grid-cols-[216px_minmax(0,1fr)]",
         sidebarCollapsed && "md:grid-cols-[64px_minmax(0,1fr)]",
       )}
     >

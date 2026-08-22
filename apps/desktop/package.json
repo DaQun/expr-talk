@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "tsx --test src/services/*.test.ts src/state/sessionLifecycle.test.ts",
+    "test": "tsx --test src/services/*.test.ts src/state/sessionLifecycle.test.ts src/pages/*.test.ts",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri"
   },

@@ -16,8 +16,15 @@ const providers: ASRProvider[] = [
   customOpenAITranscriptionProvider,
 ];
 
+const LISTED_ASR_IDS = new Set([
+  "local-sherpa",
+  "aliyun-bailian",
+  "tencent-asr",
+  "volcengine-asr",
+]);
+
 export function listASRProviders(): ASRProviderInfo[] {
-  return providers.map((p) => p.info());
+  return providers.filter((p) => LISTED_ASR_IDS.has(p.id)).map((p) => p.info());
 }
 
 export function getASRProvider(id: string): ASRProvider | undefined {

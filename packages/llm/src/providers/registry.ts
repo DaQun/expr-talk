@@ -11,7 +11,8 @@ const providers: LLMProvider[] = [
 ];
 
 export function listLLMProviders(): LLMProviderInfo[] {
-  return providers.map((p) => p.info());
+  // custom 只作为 custom:<id> 的实现，不单独出现在渠道列表
+  return providers.filter((p) => p.id !== "custom").map((p) => p.info());
 }
 
 export function getLLMProvider(id: string): LLMProvider | undefined {
