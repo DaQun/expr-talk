@@ -892,7 +892,13 @@ export const useSessionStore = create<SessionState>((rawSet, get) => {
         activeRecorder = null;
       }
 
-      await api.deleteSession(current.id);
+      try {
+        await api.deleteSession(current.id);
+      } catch (e) {
+        const message = `删除练习记录失败：${e instanceof Error ? e.message : String(e)}`;
+        set({ error: message });
+        throw new Error(message);
+      }
 
       revokeLastWavUrl(get().lastWavUrl);
       set({
